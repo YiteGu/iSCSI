@@ -221,7 +221,10 @@ Management notification can be waited on properly.
   secret was not an error but a silent downgrade to `AuthMethod=None`.
 - **Root daemon reading the keychain before login** (R3 in the original plan).
   Only matters if auto-attach at boot is ever built; the daemon currently only
-  needs secrets after a user is logged in.
+  needs secrets after a user is logged in. Attach at login was built
+  (2026-10-22) in the app, after login, through the user's `fskit_agent`, so
+  this stays moot
+  (`docs/superpowers/specs/2026-10-22-auto-attach-at-login-design.md`).
 - **The death latch.** Three unanswered daemon calls mark a volume dead and fail
   everything after immediately. Built in response to the eight-hour wedge,
   reasoned about carefully, and never triggered in anger.

@@ -114,6 +114,7 @@ What the app does today:
   It also repairs: an update that drops the extension's registration shows up
   as an ordinary unsatisfied step with a button.
 - **Discover, add, attach, detach**, from a menu bar item or a window, with CHAP.
+- **Attach at login**, per target, retrying for five minutes when the storage is not reachable yet.
 - **A diagnostics pane** showing negotiated login parameters, session recovery
   count, and the target's write-cache state — everything the daemon knew and
   had never told anyone.
