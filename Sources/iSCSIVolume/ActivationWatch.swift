@@ -3,9 +3,9 @@
 //  When the extension gives up on a resource FSKit loaded and never activated.
 //
 //  `mount -F` loads the resource, then activates the volume the load returned:
-//  4–6 ms apart in every trace on the 26.6 VM. FSKit never sends
-//  `unloadResource`, not even on a normal detach, so a load whose activate
-//  never comes is never undone. That happened at a login on 2026-10-22: the
+//  4–13 ms apart in every trace on the 26.6 VM, 868 ms at boot. FSKit never
+//  sends `unloadResource`, not even on a normal detach, so a load whose
+//  activate never comes is never undone. That happened at a login on 2026-10-22: the
 //  first extension launch failed, fskitd refused the next mount's activate
 //  ("previous task is running"), and the instance kept the loaded resource and
 //  its daemon session with nothing mounted. While it did, fskitd refused every

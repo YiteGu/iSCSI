@@ -604,8 +604,8 @@ Each time, the account's `fskit_agent` had outlived its previous logout.
    `unloadResource`, not even on a normal detach.
 
 The extension now exits when no `activate` follows a successful load within
-30 s (`ActivationWatch`). Every measured activate came 4–6 ms after its load
-(868 ms at boot). **Verified, 2026-10-22 15:31**: the fault recurred on a
+30 s (`ActivationWatch`). Every measured activate came 4–13 ms after its
+load (868 ms at boot). **Verified, 2026-10-22 15:31**: the fault recurred on a
 login, and the guard handled it.
 
 - 15:31:46: testb's `fskit_agent` failed to launch the extension through a
@@ -616,7 +616,8 @@ login, and the guard handled it.
 - 15:32:38: fskitd logged "Instance died".
 - 15:32:51: the next attempt loaded, activated and attached.
 
-A login costs about 50 s when this happens, and needs no window. One attempt
+A login costs about 65 s when this happens (launch failure 15:31:46 to
+attached 15:32:52), and needs no window. One attempt
 that raced the exit was refused, which is harmless.
 
 It cannot be reproduced from ssh. Killing the launcher gives "Connection

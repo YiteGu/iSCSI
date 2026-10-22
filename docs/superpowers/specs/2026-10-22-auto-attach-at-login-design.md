@@ -72,7 +72,10 @@ The rules that follow from it:
     window.
 - `AppModel` publishes the request (e.g. `wantsMainWindow`). The menu bar
   label observes it, calls `openWindow(id: "main")` and `NSApp.activate()`,
-  then clears it.
+  then clears it. At the end of an auto-attach run the window is also opened
+  by URL (`me.herko.iscsiinitiator://main`, handled by the `Window` scene),
+  because a hidden item's label is not evaluated in the background. See
+  Untested risks.
 - Only a login launch runs auto-attach. A manual launch, a Sparkle relaunch or
   a reopen never attaches anything the user did not click.
 - **One launch at login.** While `SMAppService.mainApp.status == .enabled`, call
@@ -289,9 +292,9 @@ CI timing fragility in `CLAUDE.md` applies. The app wires it to
   fskitd refused every new mount of that resource ("resource state is 4").
   FSKit never sends `unloadResource`, so the extension now exits when no
   `activate` follows a successful load within 30 s. Every measured load was
-  activated within 6 ms, or 868 ms at boot. *(My call.)* **Verified** when it
+  activated within 4–13 ms, or 868 ms at boot. *(My call.)* **Verified** when it
   recurred at a later login: the extension exited, fskitd logged "Instance
-  died", and the next attempt attached, about 50 s after the launch failure.
+  died", and the next attempt attached, about 65 s after the launch failure.
 
 ## Left to the builder
 

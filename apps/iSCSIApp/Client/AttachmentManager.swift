@@ -353,10 +353,17 @@ final class AttachmentManager: ObservableObject {
     /// Every mount on this Mac, every user's. getmntinfo: no subprocess, no
     /// locale, no substring false matches, and `MNT_NOWAIT`, so it cannot
     /// block on a wedged target.
+    ///
+    /// The `_r_np` form, with a buffer of our own: plain `getmntinfo` returns
+    /// one static buffer that the next call may free, and the attach-at-login
+    /// run reads the table on the main actor while attach and detach read it
+    /// on detached tasks.
     nonisolated static func mountTable() -> [MountTableEntry] {
         var buffer: UnsafeMutablePointer<statfs>?
-        let count = getmntinfo(&buffer, MNT_NOWAIT)
-        guard count > 0, let buffer else { return [] }
+        let count = getmntinfo_r_np(&buffer, MNT_NOWAIT)
+        guard let buffer else { return [] }
+        defer { free(buffer) }
+        guard count > 0 else { return [] }
         return (0..<Int(count)).map { index in
             var entry = buffer[index]
             return MountTableEntry(from: cString(&entry.f_mntfromname),
