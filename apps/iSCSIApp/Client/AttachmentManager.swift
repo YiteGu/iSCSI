@@ -128,6 +128,18 @@ final class AttachmentManager: ObservableObject {
         }
     }
 
+    /// Tags of these targets that have an FSKit mount in this user's cache
+    /// right now, recorded as an attachment or not. A mount table read
+    /// (`MNT_NOWAIT`), so it cannot block on a wedged target.
+    static func mountedTags(of targets: [TargetRecordView]) -> Set<String> {
+        Set(targets.compactMap { target in
+            let tag = MountpointTag.derive(
+                portal: MountpointTag.portal(host: target.host, port: target.port),
+                targetIQN: target.targetIQN, lun: target.lun)
+            return isMounted(hiddenDirectory(tag: tag).path) ? tag : nil
+        })
+    }
+
     static func hiddenDirectory(tag: String) -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Caches/me.herko.iSCSIInitiator")

@@ -52,6 +52,9 @@ struct ISCSIInitiatorApp: App {
                 .frame(minWidth: 760, minHeight: 480)
         }
         .defaultLaunchBehavior(.suppressed)
+        // Not restored from saved state either: a window left open at logout
+        // must not come back on a login launch. Every other launch asks for it.
+        .restorationBehavior(.disabled)
         .commands {
             CommandGroup(after: .toolbar) {
                 Button("Refresh") { Task { await model.refresh() } }

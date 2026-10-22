@@ -75,6 +75,11 @@ public struct AutoAttachRun: Sendable, Equatable {
         states[id] = .cancelled
     }
 
+    /// The app is being removed: nothing more may start.
+    public mutating func cancelAll() {
+        for id in order { states[id] = .cancelled }
+    }
+
     /// When `id` may next start, or nil if it never will again.
     public func nextStart(for id: String) -> Duration? {
         guard case .waiting(let lastStart) = states[id] else { return nil }
@@ -101,9 +106,15 @@ public struct AutoAttachRun: Sendable, Equatable {
     }
 
     /// Marked targets this user does not already have attached, in list order.
+    /// `excluding` holds targets the user took over before the run could begin
+    /// — a cancel that arrives while the target list is still being read has
+    /// no run to land in, and must not be lost.
     public static func pendingTargetIDs(_ targets: [TargetRecord],
-                                        attachedTargetIDs: Set<String>) -> [String] {
-        targets.filter { $0.autoAttach && !attachedTargetIDs.contains($0.id) }.map(\.id)
+                                        attachedTargetIDs: Set<String>,
+                                        excluding: Set<String>) -> [String] {
+        targets.filter {
+            $0.autoAttach && !attachedTargetIDs.contains($0.id) && !excluding.contains($0.id)
+        }.map(\.id)
     }
 
     /// Another login session on this Mac is using the target.
@@ -112,12 +123,22 @@ public struct AutoAttachRun: Sendable, Equatable {
     /// login item and the mounts are per user, so under fast user switching a
     /// second user's login could mount a volume the first has mounted — two
     /// independent writers on one APFS volume. A daemon session for the target
-    /// that none of this user's attachments accounts for is someone else's.
+    /// that none of this user's mounts accounts for is someone else's.
     /// Sessions die with the client that opened them, so a live one is a live
     /// user, not a leftover from this user's last login.
+    ///
+    /// "This user's mounts" is the attachment list *and* the mount table, by
+    /// `MountpointTag`: an attach whose `mount -F` succeeded but whose image
+    /// layer failed leaves a mount, holding a session, that never reached the
+    /// attachment list — and that session is ours.
     public static func isInUseElsewhere(_ target: TargetRecord, sessions: [SessionInfo],
-                                        attachedTargetIDs: Set<String>) -> Bool {
+                                        attachedTargetIDs: Set<String>,
+                                        mountedTags: Set<String>) -> Bool {
         guard !attachedTargetIDs.contains(target.id) else { return false }
+        let tag = MountpointTag.derive(
+            portal: MountpointTag.portal(host: target.host, port: target.port),
+            targetIQN: target.targetIQN, lun: target.lun)
+        guard !mountedTags.contains(tag) else { return false }
         return sessions.contains { $0.targetIQN == target.targetIQN && $0.lun == target.lun }
     }
 }

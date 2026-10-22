@@ -55,6 +55,10 @@ final class AutoAttacher {
     private var deadline: Task<Void, Never>?
     private var lastErrors: [String: PresentableError] = [:]
     private var onFinish: (@MainActor () -> Void)?
+    /// Every target the user has acted on since launch. Kept apart from `run`
+    /// because a cancel can arrive while the target list is still being read,
+    /// before there is a run for it to land in.
+    private var takenOver: Set<String> = []
 
     init(model: AppModel) { self.model = model }
 
@@ -77,9 +81,26 @@ final class AutoAttacher {
     /// The user acted on this target — attached, detached, removed or unchecked
     /// it. It is never tried again by this run and is not a failure.
     func cancel(targetID id: String) {
+        takenOver.insert(id)
         run.cancel(id)
         loops[id]?.cancel()
         loops[id] = nil
+        // That may have been the last one outstanding.
+        if isRunning, listRead, run.isOver(at: elapsed) { conclude() }
+    }
+
+    /// The app is being removed: stop for good, without the window or
+    /// Sparkle. Attempts already in flight finish; nothing new starts.
+    func cancelAll() {
+        run.cancelAll()
+        for loop in loops.values { loop.cancel() }
+        loops = [:]
+        guard isRunning else { return }
+        concluded = true
+        isRunning = false
+        deadline?.cancel()
+        onFinish = nil
+        autoAttachLog.info("run stopped for uninstall")
     }
 
     // MARK: - The run
@@ -97,7 +118,8 @@ final class AutoAttacher {
         // idempotent and completes it.
         let attached = Set(model.attachments.attachments.filter { $0.device != nil }
             .map(\.targetID))
-        let pending = AutoAttachRun.pendingTargetIDs(model.targets, attachedTargetIDs: attached)
+        let pending = AutoAttachRun.pendingTargetIDs(model.targets, attachedTargetIDs: attached,
+                                                     excluding: takenOver)
         run = AutoAttachRun(targetIDs: pending)
         autoAttachLog.info("\(pending.count) marked target(s) to attach")
         if run.isOver(at: elapsed) { conclude(); return }
@@ -110,6 +132,13 @@ final class AutoAttacher {
         while run.canStart(id, at: elapsed) {
             guard let target = model.targets.first(where: { $0.id == id }) else {
                 run.cancel(id)
+                break
+            }
+            // Busy before our attempt has started means a manual Attach or
+            // Detach is under way: the user has it, and two attaches of one
+            // target would race `mount -F` on one path.
+            if model.busy.contains(id) {
+                cancel(targetID: id)
                 break
             }
             run.started(id, at: elapsed)
@@ -130,10 +159,13 @@ final class AutoAttacher {
                                     suggestion: Self.setupSuggestion)
         }
         do {
-            // Every mount of this user's counts as ours, half-attached or not.
+            // Every mount of this user's counts as ours: recorded attachments,
+            // and FSKit mounts an earlier attempt left without recording.
             let ours = Set(model.attachments.attachments.map(\.targetID))
+            let mounted = AttachmentManager.mountedTags(of: [target])
             let sessions = try await DaemonConnection.sessions()
-            if AutoAttachRun.isInUseElsewhere(target, sessions: sessions, attachedTargetIDs: ours) {
+            if AutoAttachRun.isInUseElsewhere(target, sessions: sessions, attachedTargetIDs: ours,
+                                              mountedTags: mounted) {
                 return PresentableError(title: title, message: Self.inUseMessage,
                                         suggestion: Self.inUseSuggestion)
             }

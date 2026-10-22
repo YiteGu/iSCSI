@@ -9,7 +9,7 @@
 //    1. Detach every volume.       A mounted volume whose app is gone cannot be
 //                                  taken down by anything the user can find.
 //    2. Delete secrets and data.   Both live in the *daemon's* context. After
-//                                  step 3 the app cannot reach the keychain
+//                                  step 4 the app cannot reach the keychain
 //                                  items, and they would outlive the app with
 //                                  nothing left that knows their names.
 //    3. Remove the login item.     Independent of the daemon; done while the
@@ -58,6 +58,8 @@ final class Uninstaller: ObservableObject {
     func run() async {
         isRunning = true
         finished = false
+        // A login-time run still retrying would mount behind "Detach volumes".
+        model.autoAttacher.cancelAll()
         steps = [
             Step(label: "Detach volumes", outcome: .pending),
             Step(label: "Delete saved targets and passwords", outcome: .pending),

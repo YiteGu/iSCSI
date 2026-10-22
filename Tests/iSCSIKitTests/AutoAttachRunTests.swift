@@ -112,24 +112,53 @@ struct AutoAttachRunTests {
     @Test("only marked targets that are not attached are pending")
     func onlyMarkedUnattachedTargetsArePending() {
         let targets = [record("t1"), record("t2"), record("t3", autoAttach: false)]
-        #expect(AutoAttachRun.pendingTargetIDs(targets, attachedTargetIDs: ["t2"]) == ["t1"])
+        #expect(AutoAttachRun.pendingTargetIDs(targets, attachedTargetIDs: ["t2"], excluding: []) == ["t1"])
     }
 
     @Test("another session on the target counts as in use elsewhere")
     func sessionElsewhereCountsAsInUse() {
         #expect(AutoAttachRun.isInUseElsewhere(record("t1"), sessions: [session()],
-                                               attachedTargetIDs: []))
+                                               attachedTargetIDs: [], mountedTags: []))
     }
 
     @Test("this user's own attachment is not in use elsewhere")
     func ownAttachmentIsNotElsewhere() {
         #expect(!AutoAttachRun.isInUseElsewhere(record("t1"), sessions: [session()],
-                                                attachedTargetIDs: ["t1"]))
+                                                attachedTargetIDs: ["t1"], mountedTags: []))
+    }
+
+    @Test("this user's own mount that never made it into the attachment list is not elsewhere")
+    func ownUnrecordedMountIsNotElsewhere() {
+        // `mount -F` succeeded, then the image layer failed: the FSKit mount
+        // holds a session, but the app never recorded an attachment.
+        let target = record("t1")
+        let tag = MountpointTag.derive(portal: MountpointTag.portal(host: target.host,
+                                                                    port: target.port),
+                                       targetIQN: target.targetIQN, lun: target.lun)
+        #expect(!AutoAttachRun.isInUseElsewhere(target, sessions: [session()],
+                                                attachedTargetIDs: [], mountedTags: [tag]))
+    }
+
+    @Test("a target the user took over before the run began is not pending")
+    func targetTakenOverBeforeRunIsNotPending() {
+        let targets = [record("t1"), record("t2")]
+        #expect(AutoAttachRun.pendingTargetIDs(targets, attachedTargetIDs: [],
+                                               excluding: ["t1"]) == ["t2"])
+    }
+
+    @Test("cancelling every target ends the run with nothing to report")
+    func cancellingEverythingEndsTheRun() {
+        var run = AutoAttachRun(targetIDs: ["a", "b"])
+        run.started("a", at: .zero)
+        run.cancelAll()
+        #expect(run.isOver(at: .seconds(1)))
+        #expect(!run.canStart("b", at: .seconds(1)))
+        #expect(run.failures.isEmpty)
     }
 
     @Test("a session on another LUN of the same target does not count")
     func otherLUNDoesNotCount() {
         #expect(!AutoAttachRun.isInUseElsewhere(record("t1", lun: 0), sessions: [session(lun: 1)],
-                                                attachedTargetIDs: []))
+                                                attachedTargetIDs: [], mountedTags: []))
     }
 }

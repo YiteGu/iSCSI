@@ -9,6 +9,7 @@
 
 import AppKit
 import ServiceManagement
+import iSCSIKit
 
 @MainActor
 enum LoginItem {
@@ -33,16 +34,26 @@ enum LoginItem {
         try await SMAppService.mainApp.unregister()
     }
 
+    /// Whether this process has called `disableRelaunchOnLogin()` and not yet
+    /// undone it. AppKit keeps a counter, so the calls must pair up exactly.
+    private static var relaunchDisabled = false
+
     /// While the login item is on, macOS must not also relaunch the app through
     /// "Reopen windows when logging back in". That relaunch is either a second,
     /// non-login launch — which skips auto-attach — or, reaching the windowless
     /// login instance, a reopen that opens the window. One launch at login, and
-    /// it is the login item's.
+    /// it is the login item's. `LoginItemPolicy.relaunchChange` has the rule.
     static func applyRelaunchPolicy() {
-        if status == .enabled {
+        switch LoginItemPolicy.relaunchChange(loginItemEnabled: status == .enabled,
+                                              relaunchDisabled: relaunchDisabled) {
+        case .disable:
             NSApp.disableRelaunchOnLogin()
-        } else {
+            relaunchDisabled = true
+        case .enable:
             NSApp.enableRelaunchOnLogin()
+            relaunchDisabled = false
+        case .none:
+            break
         }
     }
 }

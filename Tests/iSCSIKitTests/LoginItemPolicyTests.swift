@@ -44,6 +44,28 @@ struct LoginItemPolicyTests {
         #expect(action(saved: false, anyMarked: false, registered: false, enabled: false) == .none)
     }
 
+    // NSApp's relaunch-on-login switch is a counter, not a setting.
+
+    @Test("a launch with the login item off touches nothing")
+    func launchWithItemOffMakesNoCall() {
+        #expect(LoginItemPolicy.relaunchChange(loginItemEnabled: false, relaunchDisabled: false)
+                == .none)
+    }
+
+    @Test("an enabled login item disables relaunch once")
+    func enabledItemDisablesRelaunchOnce() {
+        #expect(LoginItemPolicy.relaunchChange(loginItemEnabled: true, relaunchDisabled: false)
+                == .disable)
+        #expect(LoginItemPolicy.relaunchChange(loginItemEnabled: true, relaunchDisabled: true)
+                == .none)
+    }
+
+    @Test("turning the login item off undoes exactly its own disable")
+    func turningOffUndoesTheDisable() {
+        #expect(LoginItemPolicy.relaunchChange(loginItemEnabled: false, relaunchDisabled: true)
+                == .enable)
+    }
+
     @Test("a copy outside /Applications does not register")
     func outsideApplicationsIsBlocked() {
         #expect(action(saved: true, anyMarked: true, registered: false, enabled: false,
