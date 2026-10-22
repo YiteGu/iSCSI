@@ -169,6 +169,43 @@ and `diskCorrupt=` from the unmount summary line; `diskCorrupt` must be 0.
 Run `df -h /` before the soak, at its end, and after the detach: the space the
 cache took must be back after the detach.
 
+## Attach at login (2026-10-22)
+
+Run on the SIP-on VM with the notarized RC installed in place. The only scratch
+target is name-testing. Mark it "Attach at login", plus a target that cannot be
+reached: a bogus portal, or a `pfctl` block on the NAS address. Every step
+logs to one place:
+
+    /usr/bin/log show --last 10m --predicate 'subsystem == "me.herko.iSCSIInitiator.app" AND category == "autoattach"'
+
+Test login launches with a real GUI Log Out. `shutdown -r` relaunches through
+a stale "Reopen windows" list: the app comes back "launched by hand", opens
+its window, and attaches nothing. A boot with auto-login is a real login
+launch.
+
+| Check | Expected | 2026-10-22 |
+|---|---|---|
+| Log in with both targets reachable | "launched as a login item", attached, no window | name-testing 9–23 s after launch |
+| Log in with one target unreachable | retried every 15 s; at 5 min the window opens, an orange warning on that row only | "The target did not answer in time." |
+| Unblock the NAS mid-run | attaches within one interval, no window | 3 s after unblocking |
+| Manual launch, Dock click, menu bar item hidden | "launched by hand", window, nothing attached; Dock click reopens it | pass |
+| Menu bar item hidden, a run that ends with a failure | the window opens at 5 min, "asking for the main window by URL" then "main window shown by URL" | failed before the URL fallback: no window until a Dock click |
+| Attempts that make no XPC call (an "in use" target) | 15 s apart, start to start | before the activity assertion: App Nap stretched them to 70–100 s |
+| Window open, Log Out with "Reopen windows" checked | one launch, a login launch, no window | pass |
+| Uncheck the last marked target | gone from Open at Login | pass |
+| Remove the item with − in System Settings | `.notRegistered`: "not set to open at login … Turn On", no alert | pass; there is no toggle, so the "turned off" banner is not reached |
+| Account B logs in while account A has the target mounted | "In use by another session on this Mac" every attempt; at 5 min B's window shows it | pass (window via Dock click; see the hidden-item row) |
+| Account A ejects during B's run | B attaches within one interval, no window | attached, but about 90 s late because of App Nap |
+
+After any login, check that FSKit did not refuse the resource
+(`docs/open-questions.md` item 13):
+
+    /usr/bin/log show --last 1h --predicate 'process == "fskitd" AND (eventMessage CONTAINS "previous task is running" OR eventMessage CONTAINS "resource state is")'
+
+For two accounts, finish the second account's Setup **before** attaching
+anything in the first. Its FSKit enablement restarts fskitd, which disconnects
+every account's volumes (`docs/open-questions.md` item 14).
+
 ## Fuzzing
 
 `scripts/fuzz.sh [seconds]` builds `pdu-fuzz` with AddressSanitizer and runs a

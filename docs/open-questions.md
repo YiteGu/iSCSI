@@ -627,6 +627,34 @@ session for the target as another user's, so the stranded session showed as
 "In use by another session on this Mac" on every retry. "In use elsewhere"
 now comes from the mount table instead (`AutoAttachRun.isInUseElsewhere`).
 
+## 14. Enabling the extension for one account disconnects every account's volumes
+
+On macOS 26.x the FSKit switch in System Settings does not move. Setup
+therefore writes the enablement entry itself, then has the daemon run
+`killall fskitd` (`refreshFSKitEnablement`) so the change takes effect. That
+kill reaches every user. Seen on the 26.6 VM, 2026-10-22, with two accounts:
+
+- 14:02:01: a second account's first-time Setup restarted fskitd. The first
+  account's `fskit_agent` logged "exiting as fskitd died". The FSKit layer
+  under its attached name-testing went with it.
+- 14:04:46: `hdiejectd` failed to unmount that APFS volume (EIO).
+- 14:04:54: a second attempt succeeded, and the image was detached.
+
+Whatever that volume had not yet written was lost, as in a target power cut.
+On 26.x the FAT and exFAT drivers are FSKit modules too (`com.apple.fskit.msdos`
+shows in the same logs), so other accounts' USB drives are probably exposed as
+well. That part is inferred, not observed. The consent prompt says nothing
+about either.
+
+One account is safe in practice: the extension cannot have mounted anything
+while it was disabled for that account. The hazard is a Mac with several
+accounts, which attach at login now makes ordinary.
+
+To fix, in its own branch: before asking for the restart, read the mount table
+(`AttachmentManager.mountTable()`) and refuse, with an explanation, while any
+FSKit volume of any account is mounted. Also warn in the consent prompt.
+Restarting the Mac remains the safe way.
+
 ## A note on method
 
 Four things were got wrong during this work and three had the same cause:
