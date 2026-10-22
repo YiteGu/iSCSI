@@ -289,9 +289,9 @@ CI timing fragility in `CLAUDE.md` applies. The app wires it to
   fskitd refused every new mount of that resource ("resource state is 4").
   FSKit never sends `unloadResource`, so the extension now exits when no
   `activate` follows a successful load within 30 s. Every measured load was
-  activated within 6 ms. Unverified: whether that exit returns the resource
-  to a mountable state. It could not be reproduced from outside the login
-  session. *(My call.)*
+  activated within 6 ms, or 868 ms at boot. *(My call.)* **Verified** when it
+  recurred at a later login: the extension exited, fskitd logged "Instance
+  died", and the next attempt attached, about 50 s after the launch failure.
 
 ## Left to the builder
 

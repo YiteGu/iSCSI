@@ -189,18 +189,24 @@ launch.
 | Log in with one target unreachable | retried every 15 s; at 5 min the window opens, an orange warning on that row only | "The target did not answer in time." |
 | Unblock the NAS mid-run | attaches within one interval, no window | 3 s after unblocking |
 | Manual launch, Dock click, menu bar item hidden | "launched by hand", window, nothing attached; Dock click reopens it | pass |
-| Menu bar item hidden, a run that ends with a failure | the window opens at 5 min, "asking for the main window by URL" then "main window shown by URL" | failed before the URL fallback: no window until a Dock click |
-| Attempts that make no XPC call (an "in use" target) | 15 s apart, start to start | before the activity assertion: App Nap stretched them to 70–100 s |
+| Menu bar item hidden, a run that ends with a failure | the window opens at 5 min, "asking for the main window by URL" then "main window shown by URL" | pass with the URL fallback; before it, no window until a Dock click |
+| Attempts that make no XPC call (an "in use" target) | 15 s apart, start to start | 15.3–18.6 s with the activity assertion; App Nap stretched them to 70–100 s before it |
 | Window open, Log Out with "Reopen windows" checked | one launch, a login launch, no window | pass |
 | Uncheck the last marked target | gone from Open at Login | pass |
 | Remove the item with − in System Settings | `.notRegistered`: "not set to open at login … Turn On", no alert | pass; there is no toggle, so the "turned off" banner is not reached |
 | Account B logs in while account A has the target mounted | "In use by another session on this Mac" every attempt; at 5 min B's window shows it | pass (window via Dock click; see the hidden-item row) |
-| Account A ejects during B's run | B attaches within one interval, no window | attached, but about 90 s late because of App Nap |
+| Account A ejects during B's run | B attaches when B's session is back on screen, no window | pass: attached on switching back, 0 not attached |
 
 After any login, check that FSKit did not refuse the resource
 (`docs/open-questions.md` item 13):
 
     /usr/bin/log show --last 1h --predicate 'process == "fskitd" AND (eventMessage CONTAINS "previous task is running" OR eventMessage CONTAINS "resource state is")'
+
+An account that has been switched away from makes no progress. Its app does
+nothing while its session is off screen, though RunningBoard declines to
+suspend it. B's run picks up when B's session returns: it attaches at once if
+A has ejected by then. If B is away past the 5 min mark, the deadline and the
+overdue attempt both fire on return.
 
 For two accounts, finish the second account's Setup **before** attaching
 anything in the first. Its FSKit enablement restarts fskitd, which disconnects
