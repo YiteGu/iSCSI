@@ -583,6 +583,50 @@ Built and tested against an in-memory daemon and an in-memory cache file
   10 minutes (`spilled=93785`). Still worth stating before recommending the
   cache for write-heavy or churning workloads.
 
+## 13. A mount refused at login, and a resource FSKit never lets go of
+
+Seen once, at a login on the 26.6 VM (SIP on, 2026-10-22, attach at login).
+Not reproduced on demand.
+
+1. **10:53:59 — the first `mount -F` after login failed.** `fskit_agent`
+   survives logout. Its launch of the extension went through
+   `com.apple.extensionkitservice` (pid 945, started at boot), and the launch
+   failed with "connection to service with pid 945 … was invalidated"
+   (ExtensionKit error 2). The mount reported "File system named iSCSI not
+   found".
+2. **10:54:13 — the retry's activate was refused.** The extension launched,
+   `loadResource` succeeded and opened a daemon session, then fskitd logged
+   "Can't start new task, previous task is running" and `mount` failed with
+   `Resource busy`.
+3. **From then on, every mount of that resource was refused.** fskitd logged
+   "Can't start new task, resource state is 4" at 11:00:27. The instance kept
+   the loaded resource and the session with nothing mounted. FSKit never sends
+   `unloadResource`, not even on a normal detach.
+
+The extension now exits when no `activate` follows a successful load within
+30 s (`ActivationWatch`). Every measured activate came 4–6 ms after its load.
+Whether that exit returns the resource to a mountable state is **unverified**.
+The only data point is confounded: the instance was killed at 11:01:42, but
+nothing tried to mount again until fskitd had idle-exited at 11:36 and
+respawned. If the exit does not free it, nothing in the app can: the block
+lasts until fskitd restarts, which a running app that keeps querying FSKit
+may delay indefinitely.
+
+Not reproducible from ssh. Killing the launcher gives "Connection
+interrupted", and launchd respawns it on demand. A stopped launcher is reaped
+before a mount reaches it. A logout leaves the connection *invalidated*
+instead. Grep after logins:
+
+```sh
+/usr/bin/log show --last 1h --predicate 'process == "fskitd" AND (eventMessage CONTAINS "previous task is running" OR eventMessage CONTAINS "resource state is")'
+/usr/bin/log show --last 1h --predicate 'subsystem == "me.herko.iSCSIInitiator.fsext" AND eventMessage BEGINSWITH "no activate"'
+```
+
+The same login made a second fault visible. Attach at login read a daemon
+session for the target as another user's, so the stranded session showed as
+"In use by another session on this Mac" on every retry. "In use elsewhere"
+now comes from the mount table instead (`AutoAttachRun.isInUseElsewhere`).
+
 ## A note on method
 
 Four things were got wrong during this work and three had the same cause:

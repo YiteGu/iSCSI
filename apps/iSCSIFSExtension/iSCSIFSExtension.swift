@@ -60,6 +60,22 @@ private func redact(_ url: URL) -> String {
     return parts?.string ?? url.scheme.map { "\($0)://<redacted>" } ?? "<redacted>"
 }
 
+/// FSKit never unloads a resource whose activate does not come, and fskitd
+/// refuses every new mount of it meanwhile; this instance exits instead.
+/// `ActivationWatch` has the measurements.
+private let activationWatch = OSAllocatedUnfairLock(initialState: ActivationWatch())
+
+private func watchForActivation() {
+    activationWatch.withLock { $0.loaded(at: .now) }
+    Task.detached {
+        try? await Task.sleep(for: ActivationWatch.grace)
+        guard activationWatch.withLock({ $0.shouldGiveUp(at: .now) }) else { return }
+        // Exiting closes the XPC connection, which releases the daemon session.
+        fsLog.error("no activate \(ActivationWatch.grace, privacy: .public) after loadResource — exiting so fskitd lets go of the resource")
+        exit(0)
+    }
+}
+
 // MARK: - Extension entry point
 
 /// The Info.plist declares this as the principal class.
@@ -191,6 +207,7 @@ final class ISCSIUnaryFileSystem: FSUnaryFileSystem, FSUnaryFileSystemOperations
             // attaches a real NSError reported as "Undefined error: 0".
             containerStatus = .ready
             fsLog.log("loadResource ok, volume ready")
+            watchForActivation()
             reply(volume, nil)
         } catch {
             // The path distinguishes a sandbox EPERM from any other I/O error.
@@ -267,6 +284,7 @@ final class ProtoVolume: FSVolume, FSVolume.Operations, FSVolume.ReadWriteOperat
     func activate(options: FSTaskOptions,
                   replyHandler reply: @escaping (FSItem?, (any Error)?) -> Void) {
         fsLog.log("activate")
+        activationWatch.withLock { $0.activated() }
         reply(root, nil)
     }
 
