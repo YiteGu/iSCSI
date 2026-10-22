@@ -286,7 +286,8 @@ Rules, in this order:
     2. wraps `performAttach` in `withBusy`;
     3. on success, calls `clearAutoAttachFailure`, then keeps today's not-formatted notice;
     4. on failure, keeps today's `present`.
-  - `detach`, `delete`, and `save` of a record with `autoAttach == false` call `autoAttacher.cancel(targetID:)` and `clearAutoAttachFailure(for:)` first.
+  - `detach`, `delete`, and `save` of a record with `autoAttach == false` call `autoAttacher.cancel(targetID:)` and `clearAutoAttachFailure(for:)` first. In `save`, use `stored.id`, the id after the daemon's twin collapse, not the incoming record's.
+  - `delete` refuses while `busy.contains(target.id)` (return early). A delete during an in-flight attach would leave a FSKit mount whose record is gone, which `reconcile` never sees again.
   - `refresh` gets `reportingErrors` and the Bool result. Existing callers compile unchanged.
 
 - [ ] **Step 2: `AutoAttacher.start`.** Implement this algorithm (it is not determined by the signatures):
@@ -296,13 +297,15 @@ Rules, in this order:
       loop: if await model.refresh(reportingErrors: false) && model.isReady → break
             if elapsed >= AutoAttachRun.budget → conclude(); return     // window lands on Setup
             sleep AutoAttachRun.interval
-  run = AutoAttachRun(targetIDs: pendingTargetIDs(model.targets, attached: ids in model.attachments.attachments))
+  run = AutoAttachRun(targetIDs: pendingTargetIDs(model.targets,
+                      attached: ids of model.attachments.attachments where device != nil))
+                      // half-attached (FSKit up, no device) stays pending: attach is idempotent and completes it
   if run.isOver(at: elapsed) → conclude(); return
   one Task per pending id (kept in a [String: Task] so cancel can stop the loop between attempts):
-      while run.canStart(id, at: elapsed):
+      while run.canStart(id, at: elapsed):          // false once cancelled: checked after every await
           run.started(id, at: elapsed)
           error = await attemptOnce(id)            // nil means attached
-          run.finished(id, attached: error == nil)
+          run.finished(id, attached: error == nil) // ignored if cancelled meanwhile
           if error == nil { model.clearAutoAttachFailure(for: id) }
           else { lastErrors[id] = error; if concluded, replace that target's warning with it }
           if run.isOver(at: elapsed) → conclude()
@@ -317,10 +320,10 @@ Rules, in this order:
   ```
   - `attemptOnce(id)`:
     1. If `!model.isReady`, run `await model.setup.checkAll()` once. If setup is still not ready, return the setup-not-ready failure.
-    2. Read `DaemonConnection.sessions()`. If `AutoAttachRun.isInUseElsewhere(target, sessions:, attachedTargetIDs:)`, return the in-use failure.
-    3. Otherwise run `try await model.withBusy(id) { try await model.performAttach(target) }`. Return nil on success, the presented error on throw.
+    2. Read `DaemonConnection.sessions()`. If `AutoAttachRun.isInUseElsewhere(target, sessions:, attachedTargetIDs:)`, return the in-use failure. Here `attachedTargetIDs` is **every** attachment of this user's, device or not: any mount of ours is not "elsewhere". That is a different set from the pending set above.
+    3. Otherwise run `try await model.withBusy(id) { try await model.performAttach(target) }`. Return nil on success, including if it throws `AttachmentError.blankLUN`. Nothing throws that today, but an unformatted LUN counts as attached in the spec. For any other throw, return the presented error.
     4. Look up the target fresh from `model.targets` each time. If the record is gone, call `run.cancel(id)` and stop.
-  - `cancel(targetID:)` calls `run.cancel` and cancels that target's sleeping loop task. An attempt already in flight finishes, and the run ignores its result.
+  - `cancel(targetID:)` calls `run.cancel`, then cancels that target's loop `Task` only to break its `sleep`. The loop exits because `run.canStart` is false, not because of task cancellation, so cancellation never propagates into `performAttach` mid-XPC. To keep it that way, run each attempt in an unstructured `Task` the loop awaits, so the loop's cancellation does not reach the attempt. An attempt already in flight finishes, and the run ignores its result.
   - Log each attempt and its result at `.info`.
 
 - [ ] **Step 3: Wire the login launch.** Replace the Task 3 body of `beginLoginLaunch()` with `autoAttacher.start { [weak self] in self?.updates.start() }`.
@@ -372,7 +375,7 @@ Rules, in this order:
     - `.register` → `try LoginItem.register()`;
     - `.unregister` → `try await LoginItem.unregister()`;
     - `.blockedByLocation` and `.none` → nothing.
-  - On any error, `present(error, doing: "Changing the login item")`.
+  - On any error, `present(error, doing: "Changing the login item")`, **except** a `register()` error while the status is `.requiresApproval`. That is the user having turned it off in System Settings, and the banner already says so; an alert on every save would repeat it.
   - Finally update `loginItemStatus`.
 
 - [ ] **Step 3: Banner on `TargetsView`.**
@@ -451,7 +454,9 @@ Rules, in this order:
 
 Needs a notarized build. **Pushing the branch and running the release workflow are outward-facing: ask the user before either.** Make the RC with `gh workflow run release.yml -f publish=false --ref auto-attach-at-login`, never a tag. The DMG is the run's `dmg` artifact.
 
-Install it over the existing app with the in-place recipe in `docs/backend-a-fskit-notes.md`. Ask the user for any GUI step at the UTM console.
+Install it over the existing app with the in-place recipe in `docs/backend-a-fskit-notes.md`.
+
+**The user does every GUI step at the UTM console**, including checking the box in the editor. Do not drive the UI with Apple events; that prompts for TCC Automation and dirties the rig. The first register posts a macOS "added as a login item" notification. That is expected, not a bug.
 
 **VM rules:**
 - `ssd-vms` is live VM storage: never mark it, attach it or modify it.
@@ -479,8 +484,12 @@ Install it over the existing app with the in-place recipe in `docs/backend-a-fsk
   - If the hidden-item case fails, stop and implement the spec's URL-scheme fallback as a new task.
 - [ ] **Step 5: Window restoration.** With the app running and "Reopen windows" checked, log out and log in at the console. The user does this.
   Expected: exactly one launch, logged as a login launch, and no window.
-- [ ] **Step 6: Unregister paths.**
-  Expected: unchecking the last marked target removes the item from Login Items, and so does running Remove iSCSI Initiator…. Reinstall afterwards to restore the rig.
+- [ ] **Step 6: Unregister and turned-off paths.**
+  - Uncheck the last marked target.
+    Expected: the item is gone from Login Items.
+  - Re-check the box, turn the item off in System Settings → Login Items, then save the target again.
+    Expected: the banner reads "turned off in System Settings", and **no** alert appears.
+  - **Do not run the uninstaller on this VM.** It deletes `targets.json`, including the `ssd-vms` record, unregisters the daemon, and drops the FSKit enablement. Check the "Remove the login item" step on the SIP-off VM (`herko@192.168.0.33`) instead, after installing the same DMG there. It is a question about our code, not about consent.
 - [ ] **Step 7: Two accounts.** This needs a second user on the VM; **ask before creating one.** Then run the spec's two-account check.
   Expected:
   - with account A attached, B gets the "in use by another session" warning;
