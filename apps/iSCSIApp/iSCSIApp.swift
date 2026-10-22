@@ -8,13 +8,18 @@
 //  that lives only in the menu bar cannot be found by someone who does not
 //  already know it is there.
 //
+//  The window does not open by itself at launch: a login launch attaches
+//  marked targets with nothing on screen. `AppDelegate` decides, and
+//  `MenuBarLabel` opens it.
+//
 
 import AppKit
 import SwiftUI
 
 @main
 struct ISCSIInitiatorApp: App {
-    @StateObject private var model = AppModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    private var model: AppModel { appDelegate.model }
 
     init() {
         // The dock tile plug-in only covers the tile while the app is NOT
@@ -46,6 +51,7 @@ struct ISCSIInitiatorApp: App {
             MainWindow(model: model)
                 .frame(minWidth: 760, minHeight: 480)
         }
+        .defaultLaunchBehavior(.suppressed)
         .commands {
             CommandGroup(after: .toolbar) {
                 Button("Refresh") { Task { await model.refresh() } }
@@ -60,19 +66,9 @@ struct ISCSIInitiatorApp: App {
         MenuBarExtra {
             MenuBarContent(model: model)
         } label: {
-            // The icon carries the state: a filled drive when something is
-            // mounted, a warning when setup is incomplete. For most users on
-            // most days this is the only part of the app they look at.
-            Image(systemName: menuBarSymbol)
+            MenuBarLabel(model: model)
         }
         .menuBarExtraStyle(.window)
-    }
-
-    private var menuBarSymbol: String {
-        if !model.isReady { return "externaldrive.badge.exclamationmark" }
-        return model.attachments.attachments.contains(where: \.isFullyAttached)
-            ? "externaldrive.fill.badge.checkmark"
-            : "externaldrive"
     }
 }
 

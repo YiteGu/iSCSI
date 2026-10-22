@@ -64,8 +64,16 @@ final class AppModel: ObservableObject {
     /// mounted volume can have live writers. Explicitly-labelled eject paths
     /// skip the question — their click is the consent.
     @Published var pendingDetach: TargetRecord?
+    /// A request to show the main window. Set by the app delegate and the
+    /// auto-attach run; `MenuBarLabel` opens the window and clears it.
+    @Published var wantsMainWindow = false
 
     var isReady: Bool { setup.isReady }
+
+    /// The app was launched as a login item: nothing on screen.
+    func beginLoginLaunch() {
+        updates.start()
+    }
 
     /// Every configured target with whatever is currently true about it.
     struct Row: Identifiable {

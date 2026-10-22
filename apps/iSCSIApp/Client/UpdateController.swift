@@ -13,6 +13,12 @@
 //  the bundle drops the extension's registration, and the setup machine
 //  re-checks every condition on every launch — a Sparkle relaunch is a launch.
 //
+//  The updater starts when the app delegate says so, not in `init`. A login
+//  launch is meant to be silent while marked targets attach, and an update
+//  alert is a window; so on that launch Sparkle starts only once the
+//  auto-attach run is over. Until `start()` no check can find an update, which
+//  is why the postpone path below needs no "run in progress" input.
+//
 
 import AppKit
 import Combine
@@ -42,14 +48,22 @@ final class UpdateController: NSObject, ObservableObject {
         let invoke: () -> Void
     }
     private var resumeInstallation: InstallHandler?
+    private var didStart = false
 
     override init() {
         super.init()
         controller = SPUStandardUpdaterController(
-            startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
+            startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
         // KVO-observable, bridged once so the menu item binds a plain Bool.
         controller.updater.publisher(for: \.canCheckForUpdates)
             .assign(to: &$canCheckForUpdates)
+    }
+
+    /// Starts Sparkle, including its scheduled checks. Later calls do nothing.
+    func start() {
+        guard !didStart else { return }
+        didStart = true
+        controller.startUpdater()
     }
 
     func checkForUpdates() {
