@@ -12,9 +12,11 @@ struct AutoAttachRunTests {
                      targetIQN: "iqn.2026-08.me.herko:disk0", lun: lun, autoAttach: autoAttach)
     }
 
-    private func session(lun: UInt64 = 0) -> SessionInfo {
-        SessionInfo(handle: "h", targetIQN: "iqn.2026-08.me.herko:disk0", lun: lun,
-                    writeThrough: true, recoveryCount: 0, negotiated: [:])
+    private let home = "/Users/herko"
+
+    private func mount(_ from: String, under home: String) -> MountTableEntry {
+        MountTableEntry(from: from,
+                        on: home + "/Library/Caches/me.herko.iSCSIInitiator/e7cf144d2c2ee621")
     }
 
     @Test("every pending target may start at once")
@@ -115,28 +117,57 @@ struct AutoAttachRunTests {
         #expect(AutoAttachRun.pendingTargetIDs(targets, attachedTargetIDs: ["t2"], excluding: []) == ["t1"])
     }
 
-    @Test("another session on the target counts as in use elsewhere")
-    func sessionElsewhereCountsAsInUse() {
-        #expect(AutoAttachRun.isInUseElsewhere(record("t1"), sessions: [session()],
-                                               attachedTargetIDs: [], mountedTags: []))
+    @Test("another user's mount of the target is in use elsewhere")
+    func otherUsersMountIsInUseElsewhere() {
+        let mounts = [mount("iscsi://192.168.20.1:3260/iqn.2026-08.me.herko:disk0/0",
+                            under: "/Users/other")]
+        #expect(AutoAttachRun.isInUseElsewhere(record("t1"), mounts: mounts, home: home))
     }
 
-    @Test("this user's own attachment is not in use elsewhere")
-    func ownAttachmentIsNotElsewhere() {
-        #expect(!AutoAttachRun.isInUseElsewhere(record("t1"), sessions: [session()],
-                                                attachedTargetIDs: ["t1"], mountedTags: []))
+    @Test("this user's own mount of the target is not in use elsewhere")
+    func ownMountIsNotElsewhere() {
+        let mounts = [mount("iscsi://192.168.20.1:3260/iqn.2026-08.me.herko:disk0/0", under: home)]
+        #expect(!AutoAttachRun.isInUseElsewhere(record("t1"), mounts: mounts, home: home))
     }
 
-    @Test("this user's own mount that never made it into the attachment list is not elsewhere")
-    func ownUnrecordedMountIsNotElsewhere() {
-        // `mount -F` succeeded, then the image layer failed: the FSKit mount
-        // holds a session, but the app never recorded an attachment.
-        let target = record("t1")
-        let tag = MountpointTag.derive(portal: MountpointTag.portal(host: target.host,
-                                                                    port: target.port),
-                                       targetIQN: target.targetIQN, lun: target.lun)
-        #expect(!AutoAttachRun.isInUseElsewhere(target, sessions: [session()],
-                                                attachedTargetIDs: [], mountedTags: [tag]))
+    @Test("a target nobody has mounted is not in use, whatever sessions the daemon holds")
+    func unmountedTargetIsNotInUse() {
+        // Measured 2026-10-22: fskitd refused an activate after the extension
+        // had loaded the resource, and the extension held its daemon session
+        // with nothing mounted — a session is not a user.
+        #expect(!AutoAttachRun.isInUseElsewhere(record("t1"), mounts: [], home: home))
+    }
+
+    @Test("a home that merely starts with this user's home is someone else's")
+    func homePrefixIsNotOwnHome() {
+        let mounts = [mount("iscsi://192.168.20.1:3260/iqn.2026-08.me.herko:disk0/0",
+                            under: "/Users/herko2")]
+        #expect(AutoAttachRun.isInUseElsewhere(record("t1"), mounts: mounts, home: home))
+    }
+
+    @Test("the target is named by its IQN and LUN, not by the portal it was reached through")
+    func otherPortalSameTargetCounts() {
+        let mounts = [mount("iscsi://10.0.0.5:3270/IQN.2026-08.me.herko:disk0/0",
+                            under: "/Users/other")]
+        #expect(AutoAttachRun.isInUseElsewhere(record("t1"), mounts: mounts, home: home))
+    }
+
+    @Test("an NVMe namespace mounted by another user counts")
+    func nvmeNamespaceElsewhereCounts() {
+        let nqn = "nqn.2011-06.com.truenas:uuid:75ca6aa3:name-testing"
+        let target = TargetRecord(id: "n1", displayName: "n1", host: "192.168.20.1", port: 4420,
+                                  targetIQN: nqn, lun: 1, autoAttach: true)
+        let mounts = [mount("nvme://192.168.20.1:4420/\(nqn)/1", under: "/Users/other")]
+        #expect(AutoAttachRun.isInUseElsewhere(target, mounts: mounts, home: home))
+    }
+
+    @Test("another LUN of the same target, or anything else mounted, does not count")
+    func otherLUNOrOtherMountDoesNotCount() {
+        let mounts = [mount("iscsi://192.168.20.1:3260/iqn.2026-08.me.herko:disk0/1",
+                            under: "/Users/other"),
+                      MountTableEntry(from: "/dev/disk3s1", on: "/Volumes/Data"),
+                      MountTableEntry(from: "map auto_home", on: "/System/Volumes/Data/home")]
+        #expect(!AutoAttachRun.isInUseElsewhere(record("t1", lun: 0), mounts: mounts, home: home))
     }
 
     @Test("a target the user took over before the run began is not pending")
@@ -154,11 +185,5 @@ struct AutoAttachRunTests {
         #expect(run.isOver(at: .seconds(1)))
         #expect(!run.canStart("b", at: .seconds(1)))
         #expect(run.failures.isEmpty)
-    }
-
-    @Test("a session on another LUN of the same target does not count")
-    func otherLUNDoesNotCount() {
-        #expect(!AutoAttachRun.isInUseElsewhere(record("t1", lun: 0), sessions: [session(lun: 1)],
-                                                attachedTargetIDs: [], mountedTags: []))
     }
 }

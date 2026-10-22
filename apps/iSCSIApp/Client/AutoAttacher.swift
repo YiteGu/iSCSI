@@ -159,13 +159,9 @@ final class AutoAttacher {
                                     suggestion: Self.setupSuggestion)
         }
         do {
-            // Every mount of this user's counts as ours: recorded attachments,
-            // and FSKit mounts an earlier attempt left without recording.
-            let ours = Set(model.attachments.attachments.map(\.targetID))
-            let mounted = AttachmentManager.mountedTags(of: [target])
-            let sessions = try await DaemonConnection.sessions()
-            if AutoAttachRun.isInUseElsewhere(target, sessions: sessions, attachedTargetIDs: ours,
-                                              mountedTags: mounted) {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            if AutoAttachRun.isInUseElsewhere(target, mounts: AttachmentManager.mountTable(),
+                                              home: home) {
                 return PresentableError(title: title, message: Self.inUseMessage,
                                         suggestion: Self.inUseSuggestion)
             }

@@ -138,20 +138,25 @@ user switching, a second user's login could therefore mount a volume the first
 user has mounted. Two independent writers on one APFS volume corrupt it.
 Decided by the user: handle it.
 
-- **Before every attempt**, read `DaemonConnection.sessions()`. A target is
-  **in use elsewhere** when a session matches its `targetIQN` and `lun` (the
-  same match `AppModel.rows` uses) and this user's reconciled attachments have
-  none for that target. `reconcile` only looks under this user's home, so this
-  user's own mounts never count as "elsewhere".
+- **Before every attempt**, read the mount table (`getmntinfo`). A target is
+  **in use elsewhere** when a mount's source (`f_mntfromname`,
+  `scheme://portal/<iqn>/<lun>`) names its `targetIQN` and `lun`, and that
+  mount's mount point (`f_mntonname`) is outside this user's home. Every
+  attach starts with an FSKit mount in the home of the user who made it, so
+  this user's own mounts never count as "elsewhere". The portal is not
+  compared: one target reached through two addresses is still one target.
 - In use elsewhere → skip that target for this attempt. Do not attach it, and
   record "in use by another session on this Mac" as its last error. It stays
   pending and is checked again on schedule, so it attaches if the other
   session ends within the 5 minutes. At the end of the run it is a failure like
   any other, with that text.
-- Sessions die with their client (`ISCSIXPCService.connectionInvalidated`
-  logs out every session the dead connection owned). So a live session means
-  a live user of the target, not something left over from this user's last
-  login.
+- Not the daemon's sessions, though this design first used them. A session
+  belongs to whichever process opened it, and a process can outlive its use.
+  Measured on the 26.6 VM, 2026-10-22: after a login-time extension launch
+  failed, fskitd refused the next mount's activate ("previous task is
+  running"). The extension kept the loaded resource and its daemon session
+  with nothing mounted, so every later attempt read that session as another
+  user's. The extension now gives such a load up (see Untested risks).
 - Out of scope:
   - Two logins in the same instant both seeing no session. Fast user switching
     makes logins sequential.
@@ -267,6 +272,15 @@ CI timing fragility in `CLAUDE.md` applies. The app wires it to
   the `Window` scene (`handlesExternalEvents(matching:)`), opened with
   `NSWorkspace.open`. Build the label path first and fall back only if the VM
   check fails. *(My call.)*
+- **A load that is never activated.** At the login measured above, macOS's
+  first extension launch failed. fskitd then refused the next activate, and
+  the extension kept the loaded resource with nothing mounted. While it did,
+  fskitd refused every new mount of that resource ("resource state is 4").
+  FSKit never sends `unloadResource`, so the extension now exits when no
+  `activate` follows a successful load within 30 s. Every measured load was
+  activated within 6 ms. Unverified: whether that exit returns the resource
+  to a mountable state. It could not be reproduced from outside the login
+  session. *(My call.)*
 
 ## Left to the builder
 

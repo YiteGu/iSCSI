@@ -128,17 +128,6 @@ final class AttachmentManager: ObservableObject {
         }
     }
 
-    /// Tags of these targets that have an FSKit mount in this user's cache
-    /// right now, recorded as an attachment or not. A mount table read
-    /// (`MNT_NOWAIT`), so it cannot block on a wedged target.
-    static func mountedTags(of targets: [TargetRecordView]) -> Set<String> {
-        Set(targets.compactMap { target in
-            let tag = MountpointTag.derive(
-                portal: MountpointTag.portal(host: target.host, port: target.port),
-                targetIQN: target.targetIQN, lun: target.lun)
-            return isMounted(hiddenDirectory(tag: tag).path) ? tag : nil
-        })
-    }
 
     static func hiddenDirectory(tag: String) -> URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -358,18 +347,25 @@ final class AttachmentManager: ObservableObject {
     }
 
     nonisolated private static func isMounted(_ path: String) -> Bool {
-        // getmntinfo: no subprocess, no locale, no substring false matches.
+        mountTable().contains { $0.on == path }
+    }
+
+    /// Every mount on this Mac, every user's. getmntinfo: no subprocess, no
+    /// locale, no substring false matches, and `MNT_NOWAIT`, so it cannot
+    /// block on a wedged target.
+    nonisolated static func mountTable() -> [MountTableEntry] {
         var buffer: UnsafeMutablePointer<statfs>?
         let count = getmntinfo(&buffer, MNT_NOWAIT)
-        guard count > 0, let buffer else { return false }
-        for index in 0..<Int(count) {
-            let entry = buffer[index]
-            let mounted = withUnsafeBytes(of: entry.f_mntonname) {
-                String(cString: $0.bindMemory(to: CChar.self).baseAddress!)
-            }
-            if mounted == path { return true }
+        guard count > 0, let buffer else { return [] }
+        return (0..<Int(count)).map { index in
+            var entry = buffer[index]
+            return MountTableEntry(from: cString(&entry.f_mntfromname),
+                                   on: cString(&entry.f_mntonname))
         }
-        return false
+    }
+
+    nonisolated private static func cString<T>(_ field: inout T) -> String {
+        withUnsafeBytes(of: &field) { String(cString: $0.bindMemory(to: CChar.self).baseAddress!) }
     }
 
     /// Which /dev/diskN is serving a given image, according to hdiutil.

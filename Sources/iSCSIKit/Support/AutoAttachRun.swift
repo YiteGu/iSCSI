@@ -122,23 +122,49 @@ public struct AutoAttachRun: Sendable, Equatable {
     /// `autoAttach` lives in the daemon's machine-wide `targets.json`, but the
     /// login item and the mounts are per user, so under fast user switching a
     /// second user's login could mount a volume the first has mounted — two
-    /// independent writers on one APFS volume. A daemon session for the target
-    /// that none of this user's mounts accounts for is someone else's.
-    /// Sessions die with the client that opened them, so a live one is a live
-    /// user, not a leftover from this user's last login.
+    /// independent writers on one APFS volume. The mount table is the witness:
+    /// every attach starts with an FSKit mount whose source names the target,
+    /// on a mount point in the home of the user who made it. One outside this
+    /// user's home is someone else's.
     ///
-    /// "This user's mounts" is the attachment list *and* the mount table, by
-    /// `MountpointTag`: an attach whose `mount -F` succeeded but whose image
-    /// layer failed leaves a mount, holding a session, that never reached the
-    /// attachment list — and that session is ours.
-    public static func isInUseElsewhere(_ target: TargetRecord, sessions: [SessionInfo],
-                                        attachedTargetIDs: Set<String>,
-                                        mountedTags: Set<String>) -> Bool {
-        guard !attachedTargetIDs.contains(target.id) else { return false }
-        let tag = MountpointTag.derive(
-            portal: MountpointTag.portal(host: target.host, port: target.port),
-            targetIQN: target.targetIQN, lun: target.lun)
-        guard !mountedTags.contains(tag) else { return false }
-        return sessions.contains { $0.targetIQN == target.targetIQN && $0.lun == target.lun }
+    /// Not the daemon's sessions: they belong to whatever process opened them,
+    /// and a process can outlive its use. Measured 2026-10-22 on the 26.6 VM:
+    /// fskitd refused the activate that follows a load, the extension kept the
+    /// loaded resource and its session with nothing mounted, and every later
+    /// attempt read that session as another user.
+    ///
+    /// The target is matched by name and LUN, not portal: one target reached
+    /// through a group address and through its own is still one target.
+    public static func isInUseElsewhere(_ target: TargetRecord, mounts: [MountTableEntry],
+                                        home: String) -> Bool {
+        let ownPrefix = home.hasSuffix("/") ? home : home + "/"
+        return mounts.contains { entry in
+            guard !entry.on.hasPrefix(ownPrefix),
+                  let mounted = mountedTarget(entry.from) else { return false }
+            return mounted.lun == target.lun
+                && mounted.name.caseInsensitiveCompare(target.targetIQN) == .orderedSame
+        }
+    }
+
+    /// The target name and LUN in an attach's mount source,
+    /// `scheme://portal/<iqn-or-nqn>/<lun-or-nsid>`; nil for any other mount.
+    private static func mountedTarget(_ source: String) -> (name: String, lun: UInt64)? {
+        guard let url = URL(string: source), url.scheme == "iscsi" || url.scheme == "nvme"
+        else { return nil }
+        let parts = url.path.split(separator: "/")
+        guard parts.count == 2, let lun = UInt64(parts[1]) else { return nil }
+        return (String(parts[0]), lun)
+    }
+}
+
+/// One row of the mount table: what is mounted (`f_mntfromname`) where
+/// (`f_mntonname`).
+public struct MountTableEntry: Sendable, Equatable {
+    public let from: String
+    public let on: String
+
+    public init(from: String, on: String) {
+        self.from = from
+        self.on = on
     }
 }
