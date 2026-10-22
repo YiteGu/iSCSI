@@ -67,12 +67,36 @@ final class AppModel: ObservableObject {
     /// A request to show the main window. Set by the app delegate and the
     /// auto-attach run; `MenuBarLabel` opens the window and clears it.
     @Published var wantsMainWindow = false
+    /// Marked targets the login-time run could not attach, by target id. Set
+    /// when the run ends; cleared for a target once it attaches by any path, or
+    /// when the user removes it or unchecks it.
+    @Published private(set) var autoAttachFailures: [String: PresentableError] = [:]
+
+    lazy var autoAttacher = AutoAttacher(model: self)
 
     var isReady: Bool { setup.isReady }
 
-    /// The app was launched as a login item: nothing on screen.
+    /// The app was launched as a login item: attach what is marked, with
+    /// nothing on screen. Sparkle waits for the run — an update alert is a
+    /// window.
     func beginLoginLaunch() {
-        updates.start()
+        autoAttacher.start { [weak self] in self?.updates.start() }
+    }
+
+    func recordAutoAttachFailures(_ failures: [String: PresentableError]) {
+        autoAttachFailures.merge(failures) { _, new in new }
+    }
+
+    func clearAutoAttachFailure(for id: String) {
+        autoAttachFailures[id] = nil
+    }
+
+    /// Marks a target busy for the duration of `work`, so its row shows
+    /// progress and refuses a second click.
+    func withBusy<T>(_ id: String, _ work: () async throws -> T) async rethrows -> T {
+        busy.insert(id)
+        defer { busy.remove(id) }
+        return try await work()
     }
 
     /// Every configured target with whatever is currently true about it.
@@ -81,6 +105,8 @@ final class AppModel: ObservableObject {
         let attachment: Attachment?
         let session: SessionInfo?
         let isBusy: Bool
+        /// Why this marked target is not attached after the login-time run.
+        let autoAttachFailure: PresentableError?
         var id: String { target.id }
 
         var isAttached: Bool { attachment?.isFullyAttached ?? false }
@@ -93,7 +119,8 @@ final class AppModel: ObservableObject {
                 attachment: attachments.attachments.first { $0.targetID == target.id },
                 session: sessions.first { $0.targetIQN == target.targetIQN
                                           && $0.lun == target.lun },
-                isBusy: busy.contains(target.id))
+                isBusy: busy.contains(target.id),
+                autoAttachFailure: autoAttachFailures[target.id])
         }
     }
 
@@ -101,18 +128,28 @@ final class AppModel: ObservableObject {
     /// foreground, because all of this can change without the app being told:
     /// the user can eject in Finder, the daemon can be denied in System
     /// Settings, a session can drop.
-    func refresh() async {
+    ///
+    /// Returns whether the target list was read. The login-time run passes
+    /// `reportingErrors: false`: a daemon that is not answering yet a few
+    /// seconds after login is expected there, not something to alert about.
+    @discardableResult
+    func refresh(reportingErrors: Bool = true) async -> Bool {
         await setup.checkAll()
         guard setup.isReady else {
             sessions = []
-            return
+            return false
         }
         do {
             targets = try await DaemonConnection.listTargets()
             sessions = try await DaemonConnection.sessions()
             await attachments.reconcile(targets: targets)
+            for attachment in attachments.attachments where attachment.device != nil {
+                autoAttachFailures[attachment.targetID] = nil
+            }
+            return true
         } catch {
-            present(error, doing: "Reading your targets")
+            if reportingErrors { present(error, doing: "Reading your targets") }
+            return false
         }
     }
 
@@ -121,6 +158,10 @@ final class AppModel: ObservableObject {
             // Use the id the daemon stored under: re-adding an existing
             // target keeps the old record's id.
             let stored = try await DaemonConnection.saveTarget(target)
+            if !stored.autoAttach {
+                autoAttacher.cancel(targetID: stored.id)
+                clearAutoAttachFailure(for: stored.id)
+            }
             // Secrets go in their own calls, never into targets.json; and
             // clearing a user name clears its secret, or re-adding the name
             // later silently resurrects a removed credential.
@@ -142,6 +183,11 @@ final class AppModel: ObservableObject {
     }
 
     func delete(_ target: TargetRecord) async {
+        // Not mid-attach: the mount it is making would outlive its record, and
+        // `reconcile` only looks for mounts of targets that still exist.
+        guard !busy.contains(target.id) else { return }
+        autoAttacher.cancel(targetID: target.id)
+        clearAutoAttachFailure(for: target.id)
         // Detach first, or the mounted volume outlives anything that can
         // take it down.
         if let attachment = attachments.attachments.first(where: { $0.targetID == target.id }) {
@@ -155,20 +201,28 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func attach(_ target: TargetRecord) async {
-        busy.insert(target.id)
-        defer { busy.remove(target.id) }
-        do {
-            // Check reachability and credentials before mounting: the only
-            // place a wrong secret or unreachable portal is reported as
-            // itself — during the mount it surfaces as "mount: Unable to
-            // invoke task".
-            _ = try await DaemonConnection.testConnection(
-                host: target.host, port: target.port, targetIQN: target.targetIQN,
-                lun: target.lun)
+    /// Check, mount, and refresh sessions — what Attach does, without the
+    /// alerts or the busy marker, so the login-time run can share it.
+    func performAttach(_ target: TargetRecord) async throws -> Attachment {
+        // Check reachability and credentials before mounting: the only
+        // place a wrong secret or unreachable portal is reported as
+        // itself — during the mount it surfaces as "mount: Unable to
+        // invoke task".
+        _ = try await DaemonConnection.testConnection(
+            host: target.host, port: target.port, targetIQN: target.targetIQN,
+            lun: target.lun)
 
-            let attachment = try await attachments.attach(target)
-            sessions = try await DaemonConnection.sessions()
+        let attachment = try await attachments.attach(target)
+        sessions = try await DaemonConnection.sessions()
+        return attachment
+    }
+
+    func attach(_ target: TargetRecord) async {
+        // The user has taken this target over; the login-time run lets go.
+        autoAttacher.cancel(targetID: target.id)
+        do {
+            let attachment = try await withBusy(target.id) { try await performAttach(target) }
+            clearAutoAttachFailure(for: target.id)
 
             // Attached with nothing on it: how every brand-new LUN looks — a
             // normal outcome, not a failure.
@@ -186,6 +240,8 @@ final class AppModel: ObservableObject {
     }
 
     func detach(_ target: TargetRecord, ejectingMounted: Bool = false) async {
+        autoAttacher.cancel(targetID: target.id)
+        clearAutoAttachFailure(for: target.id)
         busy.insert(target.id)
         defer { busy.remove(target.id) }
         guard let attachment = attachments.attachments.first(where: { $0.targetID == target.id })
@@ -215,9 +271,13 @@ final class AppModel: ObservableObject {
     /// difference between "check the CHAP secret for this target" and a user
     /// staring at "the operation could not be completed".
     private func present(_ error: Error, doing what: String) {
+        lastError = Self.presentable(error, title: what)
+    }
+
+    static func presentable(_ error: Error, title: String) -> PresentableError {
         let ns = error as NSError
-        lastError = PresentableError(
-            title: what,
+        return PresentableError(
+            title: title,
             message: ns.localizedDescription,
             suggestion: ns.localizedRecoverySuggestion
                 ?? (error as? LocalizedError)?.recoverySuggestion)

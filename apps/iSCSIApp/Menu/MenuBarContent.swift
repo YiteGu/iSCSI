@@ -101,7 +101,9 @@ private struct MenuRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(row.isAttached ? Color.green : Color.secondary.opacity(0.4))
+                .fill(row.isAttached ? Color.green
+                      : row.autoAttachFailure != nil ? Color.orange
+                      : Color.secondary.opacity(0.4))
                 .frame(width: 8, height: 8)
 
             VStack(alignment: .leading, spacing: 1) {

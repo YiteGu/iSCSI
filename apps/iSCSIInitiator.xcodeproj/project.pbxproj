@@ -49,6 +49,7 @@
 		BF50F567786DC8AD3B01B8D8 /* initiator.icon in Resources */ = {isa = PBXBuildFile; fileRef = D3CE19CCF76F0D1615284CE8 /* initiator.icon */; };
 		BF960E140AA6D05153B72C27 /* FSKitSettingsLinkCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = 576E38B77C9C8D46244A84E2 /* FSKitSettingsLinkCheck.swift */; };
 		C0CA4A2C5992DEA05AFFA359 /* iSCSIKit in Frameworks */ = {isa = PBXBuildFile; productRef = 06E933808FB15BD15AC1AD5D /* iSCSIKit */; };
+		C2FA943143F4A95500BB9317 /* AutoAttacher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24DACD1EADC8A79E88E09803 /* AutoAttacher.swift */; };
 		CCCCC5B27408C33929C740B2 /* DiscoveryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3071CFD21D92FAF593C1D5E5 /* DiscoveryView.swift */; };
 		D0275F7018B35D408AE1692A /* iSCSIBootstrap.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 0C12DB841FAC34082F197B06 /* iSCSIBootstrap.cpp */; };
 		DFEA7DCC0B29AE751ADC8685 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63687E9A8247C4F8AD9C2785 /* AppModel.swift */; };
@@ -142,6 +143,7 @@
 		0FC18B26402E15EC48C74856 /* iSCSIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iSCSIApp.swift; sourceTree = "<group>"; };
 		1E7A00F869F8056AEACDFFAA /* iSCSIDext.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = iSCSIDext.cpp; sourceTree = "<group>"; };
 		205C0EEE79FC0ACFEE720391 /* FSKitEnablement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FSKitEnablement.swift; sourceTree = "<group>"; };
+		24DACD1EADC8A79E88E09803 /* AutoAttacher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoAttacher.swift; sourceTree = "<group>"; };
 		2F548C397A6CAF9CAF9061B5 /* FSKitSettingsLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FSKitSettingsLink.swift; sourceTree = "<group>"; };
 		3071CFD21D92FAF593C1D5E5 /* DiscoveryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoveryView.swift; sourceTree = "<group>"; };
 		3079D57585D96DD2ADCA8879 /* iSCSIFSExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = iSCSIFSExtension.swift; sourceTree = "<group>"; };
@@ -304,6 +306,7 @@
 			children = (
 				63687E9A8247C4F8AD9C2785 /* AppModel.swift */,
 				4D00ADBA0B6BA390CD8BA86F /* AttachmentManager.swift */,
+				24DACD1EADC8A79E88E09803 /* AutoAttacher.swift */,
 				EE16E15977B192C9F17111AD /* DaemonClient.swift */,
 				3CFABF815361ED5F578A112C /* LastPortal.swift */,
 				89472971AD8F995DD4FCCA0D /* LoginItem.swift */,
@@ -637,6 +640,7 @@
 				6F7C99E9771924C6C8601DC8 /* AppDelegate.swift in Sources */,
 				DFEA7DCC0B29AE751ADC8685 /* AppModel.swift in Sources */,
 				E614E32D2BC3802C587BEB01 /* AttachmentManager.swift in Sources */,
+				C2FA943143F4A95500BB9317 /* AutoAttacher.swift in Sources */,
 				4B36ECFA1BF51406DD4D11F0 /* DaemonClient.swift in Sources */,
 				63DF83BB8A3C38F8726719F4 /* DaemonController.swift in Sources */,
 				CCCCC5B27408C33929C740B2 /* DiscoveryView.swift in Sources */,

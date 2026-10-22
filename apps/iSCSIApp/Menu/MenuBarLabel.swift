@@ -19,8 +19,9 @@ struct MenuBarLabel: View {
 
     var body: some View {
         // The icon carries the state: a filled drive when something is
-        // mounted, a warning when setup is incomplete. For most users on
-        // most days this is the only part of the app they look at.
+        // mounted, a warning when setup is incomplete or a marked target did
+        // not attach at login. For most users on most days this is the only
+        // part of the app they look at.
         Image(systemName: symbol)
             .onChange(of: model.wantsMainWindow, initial: true) { _, wants in
                 guard wants else { return }
@@ -31,7 +32,9 @@ struct MenuBarLabel: View {
     }
 
     private var symbol: String {
-        if !model.isReady { return "externaldrive.badge.exclamationmark" }
+        if !model.isReady || !model.autoAttachFailures.isEmpty {
+            return "externaldrive.badge.exclamationmark"
+        }
         return model.attachments.attachments.contains(where: \.isFullyAttached)
             ? "externaldrive.fill.badge.checkmark"
             : "externaldrive"

@@ -81,10 +81,10 @@ private struct TargetRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: row.isAttached ? "externaldrive.fill.badge.checkmark"
-                                             : "externaldrive")
+            Image(systemName: symbol)
                 .font(.title2)
-                .foregroundStyle(row.isAttached ? .green : .secondary)
+                .foregroundStyle(row.isAttached ? .green
+                                 : failure != nil ? .orange : .secondary)
                 .frame(width: 28)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -95,6 +95,8 @@ private struct TargetRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
+            .help(failure.map { [$0.message, $0.suggestion].compactMap { $0 }
+                .joined(separator: "\n\n") } ?? "")
 
             Spacer()
 
@@ -119,10 +121,23 @@ private struct TargetRow: View {
         }
     }
 
+    /// Set only while the target is not attached: a warning about a volume
+    /// that is plainly mounted would be stale.
+    private var failure: PresentableError? {
+        row.isAttached ? nil : row.autoAttachFailure
+    }
+
+    private var symbol: String {
+        if row.isAttached { return "externaldrive.fill.badge.checkmark" }
+        return failure != nil ? "exclamationmark.triangle.fill" : "externaldrive"
+    }
+
     /// Says the most useful true thing available: where it is mounted if it is,
-    /// its size if connected, and otherwise where it lives.
+    /// why it did not attach at login, its size if connected, and otherwise
+    /// where it lives.
     private var subtitle: String {
         if let path = row.volumePath { return path }
+        if let failure { return "Could not attach at login — \(failure.message)" }
         if let device = row.attachment?.device {
             return "connected as \(device) — not formatted yet"
         }
