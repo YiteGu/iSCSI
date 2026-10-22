@@ -12,10 +12,12 @@
 //                                  step 3 the app cannot reach the keychain
 //                                  items, and they would outlive the app with
 //                                  nothing left that knows their names.
-//    3. Unregister the daemon.     Only now, because steps 1 and 2 need it.
-//    4. Disable and unregister the filesystem extension, in the user's context.
-//    5. Remove the cache directory with rmdir.
-//    6. Ask the user to move the app to the Trash.
+//    3. Remove the login item.     Independent of the daemon; done while the
+//                                  rest can still report.
+//    4. Unregister the daemon.     Only now, because steps 1 and 2 need it.
+//    5. Disable and unregister the filesystem extension, in the user's context.
+//    6. Remove the cache directory with rmdir.
+//    7. Ask the user to move the app to the Trash.
 //
 //  Every step reports rather than throwing, because a failure partway through
 //  must not strand the user midway: the remaining steps still run, and the
@@ -59,6 +61,7 @@ final class Uninstaller: ObservableObject {
         steps = [
             Step(label: "Detach volumes", outcome: .pending),
             Step(label: "Delete saved targets and passwords", outcome: .pending),
+            Step(label: "Remove the login item", outcome: .pending),
             Step(label: "Remove the background service", outcome: .pending),
             Step(label: "Turn off the filesystem extension", outcome: .pending),
             Step(label: "Clean up", outcome: .pending),
@@ -66,9 +69,10 @@ final class Uninstaller: ObservableObject {
 
         await step(0) { try await self.detachEverything() }
         await step(1) { try await self.removeDaemonData() }
-        await step(2) { try await self.unregisterDaemon() }
-        await step(3) { try await self.disableExtension() }
-        await step(4) { try await self.cleanCaches() }
+        await step(2) { try await self.unregisterLoginItem() }
+        await step(3) { try await self.unregisterDaemon() }
+        await step(4) { try await self.disableExtension() }
+        await step(5) { try await self.cleanCaches() }
 
         isRunning = false
         finished = true
@@ -112,6 +116,19 @@ final class Uninstaller: ObservableObject {
 
     private func removeDaemonData() async throws -> String {
         try await DaemonConnection.removeAllData()
+        return "removed"
+    }
+
+    /// "Attach at login" registers the app itself as a login item; a removed
+    /// app must not leave an entry behind that launches nothing.
+    private func unregisterLoginItem() async throws -> String {
+        let before = LoginItem.status
+        guard before != .notRegistered, before != .notFound else { return "was not set" }
+        try await LoginItem.unregister()
+        let status = LoginItem.status
+        guard status == .notRegistered || status == .notFound else {
+            throw UninstallError.loginItemStillRegistered(status)
+        }
         return "removed"
     }
 
@@ -195,13 +212,15 @@ final class Uninstaller: ObservableObject {
 enum UninstallError: LocalizedError {
     case volumesBusy([String])
     case daemonStillRegistered(SMAppService.Status)
+    case loginItemStillRegistered(SMAppService.Status)
     case cacheNotEmpty([String])
 
     var errorDescription: String? {
         switch self {
         case .volumesBusy(let paths):
             return "still in use: \(paths.joined(separator: ", "))"
-        case .daemonStillRegistered(let status):
+        case .daemonStillRegistered(let status),
+             .loginItemStillRegistered(let status):
             return "the system still reports it as registered (status \(status.rawValue))"
         case .cacheNotEmpty(let names):
             return "a mount point would not come down: \(names.joined(separator: ", "))"
@@ -215,6 +234,9 @@ enum UninstallError: LocalizedError {
                  + "Terminal sessions inside it — and try again."
         case .daemonStillRegistered:
             return "Remove it in System Settings → General → Login Items & Extensions."
+        case .loginItemStillRegistered:
+            return "Remove iSCSI Initiator from Open at Login in System Settings → "
+                 + "General → Login Items & Extensions."
         case .cacheNotEmpty:
             return "Restarting will release it, after which the folder can be deleted."
         }
