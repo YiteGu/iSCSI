@@ -4,6 +4,7 @@
 //
 
 import AppKit
+import ServiceManagement
 import SwiftUI
 import iSCSIKit
 
@@ -22,6 +23,11 @@ struct TargetsView: View {
                         TargetRow(row: row, model: model) { editing = row.target }
                     }
                 }
+            }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if model.targets.contains(where: \.autoAttach) && model.loginItemStatus != .enabled {
+                LoginItemBanner(model: model)
             }
         }
         .navigationTitle("Targets")
@@ -70,6 +76,51 @@ struct TargetsView: View {
                  + "to find what a storage device is offering."
                  : "Finish setup first — the background service and filesystem "
                  + "extension have to be running before a target can be attached.")
+        }
+    }
+}
+
+/// A target is marked "Attach at login" but the app will not be launched at
+/// login. A checked box that silently does nothing is the failure this exists
+/// to prevent. Styled like the menu's setup banner: something to do, not an
+/// error.
+private struct LoginItemBanner: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+            Text(text).font(.callout)
+            Spacer()
+            Button(buttonTitle, action: act)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private var text: String {
+        if !LoginItem.canRegisterFromHere {
+            return "Attach at login needs the app in /Applications."
+        }
+        if model.loginItemStatus == .requiresApproval {
+            return "Attach at login is turned off in System Settings."
+        }
+        return "iSCSI Initiator is not set to open at login, so nothing will attach."
+    }
+
+    private var buttonTitle: String {
+        if !LoginItem.canRegisterFromHere { return "Show in Finder" }
+        if model.loginItemStatus == .requiresApproval { return "Open Login Items…" }
+        return "Turn On"
+    }
+
+    private func act() {
+        if !LoginItem.canRegisterFromHere {
+            Task { await InstallLocation().perform() }
+        } else if model.loginItemStatus == .requiresApproval {
+            SMAppService.openSystemSettingsLoginItems()
+        } else {
+            model.turnOnLoginItem()
         }
     }
 }
@@ -193,6 +244,8 @@ struct TargetEditor: View {
     @State private var interfaceFallback: Bool
     /// nil = off. Mirrors `TargetRecord.localCacheGB` for valid sizes.
     @State private var localCacheGB: Int?
+    /// Mirrors `TargetRecord.autoAttach`.
+    @State private var autoAttach: Bool
 
     init(model: AppModel, target: TargetRecord?) {
         self.model = model
@@ -214,6 +267,7 @@ struct TargetEditor: View {
         _interfaceFallback = State(initialValue: target?.interfaceFallback ?? false)
         // A hand-edited out-of-range size shows as Off, which is what it is.
         _localCacheGB = State(initialValue: (target?.localCacheBytes ?? 0) > 0 ? target?.localCacheGB : nil)
+        _autoAttach = State(initialValue: target?.autoAttach ?? false)
     }
 
     /// The protocol is the name's prefix and nothing else: `nqn.` is
@@ -265,6 +319,15 @@ struct TargetEditor: View {
                     Text("Network")
                 } footer: {
                     Text("Takes effect the next time this target is attached.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Toggle("Attach at login", isOn: $autoAttach)
+                } footer: {
+                    Text("Attaches by itself when you log in to this Mac. If the target "
+                         + "can't be reached, keeps trying for 5 minutes, then shows a "
+                         + "warning here.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
@@ -508,7 +571,7 @@ struct TargetEditor: View {
             lun: UInt64(lun) ?? (isNVMe ? 1 : 0),
             chapUser: (isNVMe || chapUser.isEmpty) ? nil : chapUser,
             mutualChapUser: (isNVMe || mutualChapUser.isEmpty) ? nil : mutualChapUser,
-            autoAttach: existing?.autoAttach ?? false,
+            autoAttach: autoAttach,
             flushIntervalSeconds: flushInterval,
             // No UI: readahead depth adapts. An override hand-written into
             // targets.json is carried through an edit rather than erased by it.

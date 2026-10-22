@@ -10,6 +10,7 @@
 
 import Combine
 import Foundation
+import ServiceManagement
 import SwiftUI
 import iSCSIKit
 
@@ -71,6 +72,10 @@ final class AppModel: ObservableObject {
     /// when the run ends; cleared for a target once it attaches by any path, or
     /// when the user removes it or unchecks it.
     @Published private(set) var autoAttachFailures: [String: PresentableError] = [:]
+    /// Whether the app will be launched at login, which is what makes the
+    /// "Attach at login" boxes do anything. Re-read on every refresh, so
+    /// turning it off in System Settings shows up on returning to the app.
+    @Published private(set) var loginItemStatus: SMAppService.Status = .notRegistered
 
     lazy var autoAttacher = AutoAttacher(model: self)
 
@@ -134,6 +139,7 @@ final class AppModel: ObservableObject {
     /// seconds after login is expected there, not something to alert about.
     @discardableResult
     func refresh(reportingErrors: Bool = true) async -> Bool {
+        loginItemStatus = LoginItem.status
         await setup.checkAll()
         guard setup.isReady else {
             sessions = []
@@ -177,9 +183,47 @@ final class AppModel: ObservableObject {
                 try? await DaemonConnection.deleteMutualCHAPSecret(targetID: stored.id)
             }
             targets = try await DaemonConnection.listTargets()
+            await syncLoginItem(savedIsMarked: stored.autoAttach)
         } catch {
             present(error, doing: "Saving “\(target.displayName)”")
         }
+    }
+
+    /// Keeps the login item in step with the boxes, after the user's own save
+    /// or delete and never otherwise. `LoginItemPolicy` has the rules.
+    private func syncLoginItem(savedIsMarked: Bool?) async {
+        let status = LoginItem.status
+        let action = LoginItemPolicy.action(
+            savedIsMarked: savedIsMarked,
+            anyMarked: targets.contains(where: \.autoAttach),
+            isRegistered: status == .enabled || status == .requiresApproval,
+            isEnabled: status == .enabled,
+            canRegisterFromHere: LoginItem.canRegisterFromHere)
+        do {
+            switch action {
+            case .register: try LoginItem.register()
+            case .unregister: try await LoginItem.unregister()
+            case .blockedByLocation, .none: break
+            }
+        } catch {
+            // Turned off in System Settings: the banner on Targets already
+            // says so, and an alert on every save would only repeat it.
+            if !(action == .register && status == .requiresApproval) {
+                present(error, doing: "Changing the login item")
+            }
+        }
+        loginItemStatus = LoginItem.status
+    }
+
+    /// The banner's "Turn On": the user asked, so this registers even though
+    /// no save happened.
+    func turnOnLoginItem() {
+        do {
+            try LoginItem.register()
+        } catch {
+            present(error, doing: "Turning on the login item")
+        }
+        loginItemStatus = LoginItem.status
     }
 
     func delete(_ target: TargetRecord) async {
@@ -196,6 +240,7 @@ final class AppModel: ObservableObject {
         do {
             try await DaemonConnection.deleteTarget(id: target.id)
             targets = try await DaemonConnection.listTargets()
+            await syncLoginItem(savedIsMarked: nil)
         } catch {
             present(error, doing: "Removing “\(target.displayName)”")
         }

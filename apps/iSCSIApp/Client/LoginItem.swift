@@ -14,6 +14,25 @@ import ServiceManagement
 enum LoginItem {
     static var status: SMAppService.Status { SMAppService.mainApp.status }
 
+    /// The same gate the daemon's registration has: a translocated copy runs
+    /// from a path that vanishes when it quits, and one outside /Applications
+    /// is usually a stray (Downloads, a mounted DMG) — a login item pointing
+    /// there launches the wrong copy or nothing.
+    static var canRegisterFromHere: Bool {
+        let location = InstallLocation()
+        return location.isInApplications && !location.isTranslocated
+    }
+
+    static func register() throws {
+        defer { applyRelaunchPolicy() }
+        try SMAppService.mainApp.register()
+    }
+
+    static func unregister() async throws {
+        defer { applyRelaunchPolicy() }
+        try await SMAppService.mainApp.unregister()
+    }
+
     /// While the login item is on, macOS must not also relaunch the app through
     /// "Reopen windows when logging back in". That relaunch is either a second,
     /// non-login launch — which skips auto-attach — or, reaching the windowless
