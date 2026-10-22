@@ -37,6 +37,19 @@
          DockTilePlugin/Sources/DockTilePlugin.swift. -->
     <key>NSDockTilePlugIn</key>
     <string>iSCSI Initiator Dock.docktileplugin</string>
+    <!-- Opens the main window and nothing else, for a request made while the
+         app is in the background. See MainWindowURL in MenuBarLabel.swift. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>me.herko.iSCSIInitiator.window</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>me.herko.iscsiinitiator</string>
+            </array>
+        </dict>
+    </array>
     <key>NSHumanReadableCopyright</key>
     <string>iSCSI Initiator</string>
 </dict>

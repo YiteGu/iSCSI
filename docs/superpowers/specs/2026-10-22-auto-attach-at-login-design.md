@@ -271,7 +271,18 @@ CI timing fragility in `CLAUDE.md` applies. The app wires it to
   stops observing changes while hidden, the fallback is a URL scheme handled by
   the `Window` scene (`handlesExternalEvents(matching:)`), opened with
   `NSWorkspace.open`. Build the label path first and fall back only if the VM
-  check fails. *(My call.)*
+  check fails. *(My call.)* **It failed** on the 26.6 VM, 2026-10-22. With
+  the item hidden, a manual launch and a Dock click both opened the window,
+  because the app is active then. A run that ended in the background set the
+  flag, and nothing opened until a Dock click made the app active. The end of
+  a run now also opens the window by URL. The URL is pinned to this copy of
+  the app, and it shows the window and does nothing else. A MacBook with a
+  notch and a full menu bar hides the item without any setting.
+- **App Nap.** The same day, a run whose attempts made no XPC calls went
+  silent 3 s after RunningBoard enabled App Nap for the windowless app. Its
+  15 s sleeps stretched to minutes, and so did the 5 min deadline. The run now
+  holds a user-initiated activity (`ProcessInfo.beginActivity`) from start to
+  end. *(My call.)*
 - **A load that is never activated.** At the login measured above, macOS's
   first extension launch failed. fskitd then refused the next activate, and
   the extension kept the loaded resource with nothing mounted. While it did,

@@ -14,6 +14,7 @@
 //
 
 import AppKit
+import os
 import SwiftUI
 
 @main
@@ -55,6 +56,8 @@ struct ISCSIInitiatorApp: App {
         // Not restored from saved state either: a window left open at logout
         // must not come back on a login launch. Every other launch asks for it.
         .restorationBehavior(.disabled)
+        // Shown by URL when the app is in the background (MainWindowURL).
+        .handlesExternalEvents(matching: [MainWindowURL.host])
         .commands {
             CommandGroup(after: .toolbar) {
                 Button("Refresh") { Task { await model.refresh() } }
@@ -160,6 +163,10 @@ struct MainWindow: View {
                 }
                 .navigationTitle("Setup")
             }
+        }
+        .onOpenURL { _ in
+            Logger(subsystem: "me.herko.iSCSIInitiator.app", category: "autoattach")
+                .notice("main window shown by URL")
         }
         .task {
             FSKitSettingsLinkCheck.verify()

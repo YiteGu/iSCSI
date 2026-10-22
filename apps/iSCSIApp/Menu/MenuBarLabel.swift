@@ -9,8 +9,13 @@
 //  click, an auto-attach run that ended with failures) is a flag on the model
 //  that this view acts on.
 //
+//  Alive is not the same as evaluated. A hidden menu bar item's label is not
+//  evaluated while the app is in the background, so the end of an
+//  attach-at-login run also opens the window by URL (`MainWindowURL`).
+//
 
 import AppKit
+import os
 import SwiftUI
 
 struct MenuBarLabel: View {
@@ -38,5 +43,38 @@ struct MenuBarLabel: View {
         return model.attachments.attachments.contains(where: \.isFullyAttached)
             ? "externaldrive.fill.badge.checkmark"
             : "externaldrive"
+    }
+}
+
+/// The main window by URL, for a request made while the app is in the
+/// background.
+///
+/// Measured on the 26.6 VM, 2026-10-22: with the menu bar item hidden in
+/// System Settings, an attach-at-login run ended with a failure and set
+/// `wantsMainWindow`, and no window opened. The label was evaluated only once a
+/// Dock click made the app active. A MacBook with a notch and a full menu bar
+/// hides the item without any setting, which gives the same result. A URL
+/// reaches the `Window` scene as an Apple event through LaunchServices,
+/// whatever the UI is doing.
+///
+/// Anything on the Mac can open this URL, a web page included, so it shows the
+/// window and does nothing else.
+enum MainWindowURL {
+    static let scheme = "me.herko.iscsiinitiator"
+    static let host = "main"
+
+    @MainActor
+    static func open() {
+        guard let url = URL(string: "\(scheme)://\(host)") else { return }
+        let log = Logger(subsystem: "me.herko.iSCSIInitiator.app", category: "autoattach")
+        log.notice("asking for the main window by URL")
+        // Pinned to this copy: given only the URL, LaunchServices chooses
+        // among every registered copy of the app.
+        NSWorkspace.shared.open([url], withApplicationAt: Bundle.main.bundleURL,
+                                configuration: NSWorkspace.OpenConfiguration()) { _, error in
+            if let error {
+                log.error("main window URL failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 }

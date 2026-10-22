@@ -53,6 +53,11 @@ final class AutoAttacher {
     private var startedAt = ContinuousClock.now
     private var loops: [String: Task<Void, Never>] = [:]
     private var deadline: Task<Void, Never>?
+    /// Keeps App Nap off for the run. A windowless app in the background is
+    /// napped within seconds, and its 15 s sleeps stretch to minutes: measured
+    /// 2026-10-22 on the 26.6 VM, a run whose attempts made no XPC call went
+    /// silent 3 s after RunningBoard enabled App Nap.
+    private var activity: NSObjectProtocol?
     private var lastErrors: [String: PresentableError] = [:]
     private var onFinish: (@MainActor () -> Void)?
     /// Every target the user has acted on since launch. Kept apart from `run`
@@ -69,6 +74,9 @@ final class AutoAttacher {
         isRunning = true
         self.onFinish = onFinish
         startedAt = clock.now
+        activity = ProcessInfo.processInfo.beginActivity(
+            options: .userInitiatedAllowingIdleSystemSleep,
+            reason: "Attaching storage at login")
         autoAttachLog.notice("run started")
         let end = startedAt + AutoAttachRun.budget
         deadline = Task { [weak self] in
@@ -99,6 +107,7 @@ final class AutoAttacher {
         concluded = true
         isRunning = false
         deadline?.cancel()
+        endActivity()
         onFinish = nil
         autoAttachLog.notice("run stopped for uninstall")
     }
@@ -193,11 +202,17 @@ final class AutoAttacher {
         if !concluded, run.isOver(at: elapsed) { conclude() }
     }
 
+    private func endActivity() {
+        if let activity { ProcessInfo.processInfo.endActivity(activity) }
+        activity = nil
+    }
+
     private func conclude() {
         guard isRunning, !concluded else { return }
         concluded = true
         isRunning = false
         deadline?.cancel()
+        endActivity()
 
         var failures: [String: PresentableError] = [:]
         for (id, failure) in run.failures {
@@ -215,7 +230,13 @@ final class AutoAttacher {
             }
         }
         model.recordAutoAttachFailures(failures)
-        if !failures.isEmpty || !listRead { model.wantsMainWindow = true }
+        if !failures.isEmpty || !listRead {
+            // The flag alone is not enough here: the run ends with the app in
+            // the background, where a hidden menu bar item's label is never
+            // evaluated. See `MainWindowURL`.
+            model.wantsMainWindow = true
+            MainWindowURL.open()
+        }
         autoAttachLog.notice("run over: \(failures.count) not attached; target list read: \(self.listRead)")
         onFinish?()
         onFinish = nil
