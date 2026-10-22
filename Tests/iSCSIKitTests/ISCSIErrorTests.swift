@@ -128,6 +128,20 @@ struct ISCSIErrorTests {
         #expect(error.localizedRecoverySuggestion == source.recoverySuggestion)
     }
 
+    /// What an unreachable portal looks like at login: the connect deadline
+    /// fires. It used to reach the user as Foundation's generic "couldn't be
+    /// completed (iSCSIKit.DeadlineError error 0.)".
+    @Test("a connect that times out says the target did not answer")
+    func connectTimeoutSaysTheTargetDidNotAnswer() {
+        let error = ISCSIError.nsError(from: DeadlineError.timedOut,
+                                       context: "Connecting to iqn.2026-08.me.herko:disk0")
+        #expect(error.code == ISCSIError.Code.cannotConnect.rawValue)
+        #expect(error.localizedDescription
+                == "Connecting to iqn.2026-08.me.herko:disk0: The target did not answer in time.")
+        #expect(error.localizedRecoverySuggestion
+                == "Check that the storage device is powered on and that this Mac can reach it.")
+    }
+
     @Test("a task timeout is distinguishable from a lost connection")
     func timeoutIsNotDisconnection() {
         let timeout = ISCSIError.nsError(from: SessionError.taskTimedOut)

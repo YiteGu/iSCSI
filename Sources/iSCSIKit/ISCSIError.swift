@@ -260,6 +260,14 @@ public enum ISCSIError {
                         + "or set it to Automatic — in its settings.", nil)
             }
 
+        case is DeadlineError:
+            // In practice the connect or login deadline: an address nothing
+            // answers on — a storage device that is off, or a network that is
+            // not up yet, which is the usual case right after logging in.
+            return (.cannotConnect, "The target did not answer in time.",
+                    "Check that the storage device is powered on and that this Mac "
+                    + "can reach it.", nil)
+
         default:
             // The daemon's own refusals (no saved target, no stored secret) and
             // credential validation are worded to name the fix; keep it.

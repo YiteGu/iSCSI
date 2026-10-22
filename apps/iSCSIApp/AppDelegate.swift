@@ -29,10 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     func applicationDidFinishLaunching(_ notification: Notification) {
         LoginItem.applyRelaunchPolicy()
         if Self.isLoginItemLaunch(NSAppleEventManager.shared().currentAppleEvent) {
-            launchLog.info("launched as a login item")
+            launchLog.notice("launched as a login item")
             model.beginLoginLaunch()
         } else {
-            launchLog.info("launched by hand")
+            launchLog.notice("launched by hand")
             model.wantsMainWindow = true
             model.updates.start()
         }

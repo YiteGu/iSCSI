@@ -171,7 +171,8 @@ final class AttachmentManager: ObservableObject {
         let probe: (device: String?, volumes: [String]) = try await Task.detached {
             // Idempotent: attaching something already attached should report the
             // existing volume, not stack a second mount on the same path.
-            if !Self.isMounted(hiddenPath) {
+            let fskitWasMounted = Self.isMounted(hiddenPath)
+            if !fskitWasMounted {
                 let result = try Self.run("/sbin/mount",
                                           ["-F", "-t", "iSCSI", url, hiddenPath])
                 if result.status != 0 {
@@ -195,8 +196,17 @@ final class AttachmentManager: ObservableObject {
                 throw AttachmentError.noImageServed(imagePath)
             }
 
-            if let existing = Self.attachedDevice(forImage: imagePath) {
+            switch ImageAttachPlan.decide(fskitWasMounted: fskitWasMounted,
+                                          existingDevice: Self.attachedDevice(forImage: imagePath)) {
+            case .reuse(let existing):
                 return (existing, Self.mountPoints(ofDevice: existing))
+            case .replaceStale(let stale):
+                // Left by a logout that took the FSKit mount down but not the
+                // device; it serves nothing, so forcing it off loses nothing.
+                attachLog.notice("detaching stale \(stale, privacy: .public), left over from an earlier FSKit mount of \(imagePath, privacy: .public)")
+                _ = try? Self.run("/usr/bin/hdiutil", ["detach", stale, "-force"])
+            case .attach:
+                break
             }
             // -noverify: a raw LUN has no checksum, and verification would
             // read the whole device over the network first.

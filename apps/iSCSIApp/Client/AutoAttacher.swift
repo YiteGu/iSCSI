@@ -69,7 +69,7 @@ final class AutoAttacher {
         isRunning = true
         self.onFinish = onFinish
         startedAt = clock.now
-        autoAttachLog.info("run started")
+        autoAttachLog.notice("run started")
         let end = startedAt + AutoAttachRun.budget
         deadline = Task { [weak self] in
             try? await Task.sleep(until: end, clock: .continuous)
@@ -100,7 +100,7 @@ final class AutoAttacher {
         isRunning = false
         deadline?.cancel()
         onFinish = nil
-        autoAttachLog.info("run stopped for uninstall")
+        autoAttachLog.notice("run stopped for uninstall")
     }
 
     // MARK: - The run
@@ -108,7 +108,7 @@ final class AutoAttacher {
     private func readTargetsThenAttach() async {
         while !concluded {
             if await model.refresh(reportingErrors: false), model.isReady { break }
-            autoAttachLog.info("target list not readable yet; setup ready: \(self.model.isReady)")
+            autoAttachLog.notice("target list not readable yet; setup ready: \(self.model.isReady)")
             try? await Task.sleep(for: AutoAttachRun.interval)
         }
         guard !concluded else { return }
@@ -121,7 +121,7 @@ final class AutoAttacher {
         let pending = AutoAttachRun.pendingTargetIDs(model.targets, attachedTargetIDs: attached,
                                                      excluding: takenOver)
         run = AutoAttachRun(targetIDs: pending)
-        autoAttachLog.info("\(pending.count) marked target(s) to attach")
+        autoAttachLog.notice("\(pending.count) marked target(s) to attach")
         if run.isOver(at: elapsed) { conclude(); return }
         for id in pending {
             loops[id] = Task { [weak self] in await self?.loop(id) }
@@ -184,14 +184,14 @@ final class AutoAttacher {
         run.finished(id, attached: failure == nil)
         if let failure {
             lastErrors[id] = failure
-            autoAttachLog.info("“\(target.displayName, privacy: .public)” not attached: \(failure.message, privacy: .public)")
+            autoAttachLog.notice("“\(target.displayName, privacy: .public)” not attached: \(failure.message, privacy: .public)")
             // An attempt that outlived the run: its real error replaces
             // "still trying", unless the user has dealt with the target since.
             if concluded, model.autoAttachFailures[id] != nil {
                 model.recordAutoAttachFailures([id: failure])
             }
         } else {
-            autoAttachLog.info("“\(target.displayName, privacy: .public)” attached")
+            autoAttachLog.notice("“\(target.displayName, privacy: .public)” attached")
             model.clearAutoAttachFailure(for: id)
         }
         if !concluded, run.isOver(at: elapsed) { conclude() }
@@ -220,7 +220,7 @@ final class AutoAttacher {
         }
         model.recordAutoAttachFailures(failures)
         if !failures.isEmpty || !listRead { model.wantsMainWindow = true }
-        autoAttachLog.info("run over: \(failures.count) not attached; target list read: \(self.listRead)")
+        autoAttachLog.notice("run over: \(failures.count) not attached; target list read: \(self.listRead)")
         onFinish?()
         onFinish = nil
     }
