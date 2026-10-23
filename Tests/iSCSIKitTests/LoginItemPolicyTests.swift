@@ -19,6 +19,17 @@ struct LoginItemPolicyTests {
         #expect(action(saved: true, anyMarked: true, registered: false, enabled: false) == .register)
     }
 
+    @Test("an item removed in System Settings reads as not registered, and the next save of a marked target registers it")
+    func removedInSystemSettingsIsRegisteredByTheNextMarkedSave() {
+        // Measured 2026-10-22 on the 26.6 VM: removing the item with "−" under
+        // Open at Login leaves SMAppService.mainApp at .notRegistered, not
+        // .requiresApproval. The banner offers Turn On, and per the spec the
+        // removal holds until the user saves a target with the box checked.
+        #expect(action(saved: nil, anyMarked: true, registered: false, enabled: false) == .none)
+        #expect(action(saved: false, anyMarked: true, registered: false, enabled: false) == .none)
+        #expect(action(saved: true, anyMarked: true, registered: false, enabled: false) == .register)
+    }
+
     @Test("saving an unmarked target never re-registers an item the user turned off")
     func unrelatedSaveNeverRegisters() {
         #expect(action(saved: false, anyMarked: true, registered: true, enabled: false) == .none)

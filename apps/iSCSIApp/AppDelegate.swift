@@ -14,10 +14,13 @@
 //    * `currentAppleEvent` is nil in `applicationWillFinishLaunching`; it is
 //      the oapp event in `applicationDidFinishLaunching`
 //
-//  The delegate owns `AppModel` so it can act on launch before any view exists.
+//  The event test itself is `LoginLaunch.isLoginItemLaunch`, in iSCSIKit, where
+//  it is tested. The delegate owns `AppModel` so it can act on launch before
+//  any view exists.
 //
 
 import AppKit
+import iSCSIKit
 import os
 
 private let launchLog = Logger(subsystem: "me.herko.iSCSIInitiator.app", category: "autoattach")
@@ -28,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         LoginItem.applyRelaunchPolicy()
-        if Self.isLoginItemLaunch(NSAppleEventManager.shared().currentAppleEvent) {
+        if LoginLaunch.isLoginItemLaunch(NSAppleEventManager.shared().currentAppleEvent) {
             launchLog.notice("launched as a login item")
             model.beginLoginLaunch()
         } else {
@@ -42,13 +45,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                                        hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows { model.wantsMainWindow = true }
         return false
-    }
-
-    /// The open-application event a login item is launched with carries
-    /// keyAELaunchedAsLogInItem as its property data.
-    static func isLoginItemLaunch(_ event: NSAppleEventDescriptor?) -> Bool {
-        guard let event, event.eventID == AEEventID(kAEOpenApplication) else { return false }
-        return event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue
-            == OSType(keyAELaunchedAsLogInItem)
     }
 }

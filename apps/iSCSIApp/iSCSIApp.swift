@@ -14,6 +14,7 @@
 //
 
 import AppKit
+import iSCSIKit
 import os
 import SwiftUI
 
@@ -57,7 +58,7 @@ struct ISCSIInitiatorApp: App {
         // must not come back on a login launch. Every other launch asks for it.
         .restorationBehavior(.disabled)
         // Shown by URL when the app is in the background (MainWindowURL).
-        .handlesExternalEvents(matching: [MainWindowURL.host])
+        .handlesExternalEvents(matching: [MainWindowLink.host])
         .commands {
             CommandGroup(after: .toolbar) {
                 Button("Refresh") { Task { await model.refresh() } }

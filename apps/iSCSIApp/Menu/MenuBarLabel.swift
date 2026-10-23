@@ -15,6 +15,7 @@
 //
 
 import AppKit
+import iSCSIKit
 import os
 import SwiftUI
 
@@ -57,15 +58,12 @@ struct MenuBarLabel: View {
 /// reaches the `Window` scene as an Apple event through LaunchServices,
 /// whatever the UI is doing.
 ///
-/// Anything on the Mac can open this URL, a web page included, so it shows the
-/// window and does nothing else.
+/// The URL itself is `MainWindowLink`, in iSCSIKit, where a test holds it to
+/// the scheme the Info.plist declares.
 enum MainWindowURL {
-    static let scheme = "me.herko.iscsiinitiator"
-    static let host = "main"
-
     @MainActor
     static func open() {
-        guard let url = URL(string: "\(scheme)://\(host)") else { return }
+        let url = MainWindowLink.url
         let log = Logger(subsystem: "me.herko.iSCSIInitiator.app", category: "autoattach")
         log.notice("asking for the main window by URL")
         // Pinned to this copy: given only the URL, LaunchServices chooses
