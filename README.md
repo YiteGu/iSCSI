@@ -6,331 +6,105 @@
 [![tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jherskovic/iSCSI/badges/tests.json)](https://github.com/jherskovic/iSCSI/actions/workflows/ci.yml)
 [![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jherskovic/iSCSI/badges/coverage.json)](https://github.com/jherskovic/iSCSI/actions/workflows/ci.yml)
 
-A modern iSCSI and NVMe/TCP initiator for macOS 26/27 on Apple Silicon. macOS
-ships no initiator for either; the old open-source iSCSI option is a dead kext.
-This project puts the iSCSI/TCP and NVMe/TCP protocol engines in a user-space
-Swift daemon and presents the LUN or namespace as a real block device. The current FSKit/`hdiutil` backend in this project is a bit hacky,
-but it works: you can mount LUNs as APFS, with the block device provided by Apple's
-DiskImages framework. A DriverKit virtual SCSI HBA is the eventual goal once Apple lifts
-some very real throughput limits (see `docs/architecture.md`).
+iSCSIInitiator is a modern Apache-licensed, user-mode iSCSI/NVMeoF client ('initiator' in iSCSI parlance) for macOS 26+.
+I started this project because existing initiators were either dead (kexts) or expensive and commercial.
+I also wanted to see how far I could take Claude into systems programming. As it turned out, quite a lot.
+
+It is written in Swift, mostly by Claude, with a lot of handholding, review, and testing by an
+actual human (me), mostly against my homelab's TrueNAS machine.
+
+The architecture evolved during development. It started as a DriverKit module but, because of some blocking
+bugs in APFS, couldn't proceed that way. The code is still here and I still hope to work around them in the
+future. At the moment, it has a pure user-mode backend that works the following, hackish way:
+
+- iSCSI and NVMe reside in a user-space daemon. It presents targets/LUNs (namespaces, if you insist on NVMe
+  terminology) as block devices.
+- It creates a disk image file on the filesystem using FSKit, that is transparently backed by the target's device.
+- It then uses `hdiutil` to mount this "disk image", and it works!
+
+## Obvious warning
+
+This project deals with data storage, and -like any such project- there is a risk of data loss. Bugs in the Initiator,
+bugs in APFS, bugs in macOS, cosmic rays, power outages, acts of God, and plain bad luck can, may, or even **will**
+result in data loss. This is inherent to the nature of the beast, i.e. you're sending data over a network but pretending
+it's local. There are plenty of things that can go wrong.
+
+**If you use this without testing it extensively on your own hardware, network, SAN/NAS, etc, you're insane**. In any
+case, I can't be held responsible for data loss. Test it before trusting it.
+
+## Mandatory screenshot
+
+![Setup screen](https://github.com/jherskovic/iSCSI/raw/main/docs/screenshots/setup.jpg "The setup screen")
 
 ## AI warning
 
-The vast majority of the code here is written by Claude Code using Opus 5 and Fable 5.
-It was closely supervised, but most of the architecture and discovery was by trial-and-error,
-because lots of things that _should_ work, don't. Most of that is purposefully left in the repo
-to act as documentation and memory. Claude also wrote most of the documentation, although I
-reviewed and edited it.
+This README is 100% pure human-generated text. The code and documentation are almost completely written by
+Claude Opus 5+ and Fable 5+. I supervise it closely and read+review attentively, but you've been warned.
+If vibe-coded projects scare you, please move on.
+
+## Basic usage
+
+#### Setup
+
+Drag the application to /Applications like any other Mac app. On first launch the setup screen will open,
+showing any steps that need to be completed. You will likely have to enable the FSKit extension, shown below
+![FS Kit Extension pane in System Settings](https://github.com/jherskovic/iSCSI/raw/main/docs/screenshots/fskit.jpg)
+
+Certain versions of macOS, especially 26.x, have a bug that doesn't let you enable FSKit extensions through
+System Settings. The problem is UI, not permissions. The app detects this and offers an override. It is safe.
+
+You can also choose to enable the included Dock extension. The only thing it does is free the icon from Squircle Jail.
+
+Don't keep multiple copies of the app around. macOS may use their FSKit extension instead of the current version.
+The app detects this on launch and will clean it up for you if you let it. It's probably a good idea to say yes.
+
+#### Mounting a target
+
+Head to the "Discover" page and enter the address of the target you wish to connect to. Scroll down for options
+like username/password, or forcing the connection to a specific network interface. Click Search. Once discovery
+finishes, you'll be able to Add targets to the target list.
+![The list of targets](https://github.com/jherskovic/iSCSI/raw/main/docs/screenshots/attach.jpg)
+
+Once your target appears on the target list, right-click it and select "Edit" for security and caching options.
+Otherwise, click "Attach". Your target should be mounted in a few seconds. Eject it normally. Detach from the
+target in the Targets screen.
 
 ## Repo/development
 
-There are a large number of test/integration scripts that rely on my exact setup. I used
-two disposable VMs on my dev machine to test ideas and iterate. One had XCode installed,
-SIP disabled, extension barriers disabled, etc. This was used mostly for initial testing
-and letting Claude try out ideas harmlessly. The other was as 'virgin' as possible in
-order to figure out what required user prompts, whether notarization worked, etc. You'll
-see plenty of references to this in the test scripts, with logins to `herko@192.168.0.x`,
-and even an embedded password or two. They were all left in for documentation, reference,
-and history. No secrets are actually compromised.
+I (we?) use a lot of VMs running on UTM to develop and test this project. You'll see references to them in
+test scripts and the codebase, mostly `herko@non-routable-ip-address`. I didn't bother removing them from
+the repo, since I'm not exposing real passwords or actual machines.
 
-I also manually test the initiator on a completely different bare-metal macOS 26 machine.
-It works. It's not just VMs.
+There are hundreds of tests run on every iteration of the Initiator. Release builds on Github are
+properly notarized with my Apple developer certificate.
+
+I also manually test the initiator on a completely different bare-metal macOS (initially 26, now 27) machine.
+It works. It's not just VMs. I daily-drive the project, too, over Tailscale and directly. As far as I can tell, it works.
+It definitely suits my needs.
 
 ## Performance/testing
 
-Most of the work and testing is done against a LUN on my actual TrueNAS server in my
-homelab. There is also a target simulator that can be, and was, used for destructive
-testing.
+Performance is a somewhat complicated story. The best-case scenario for performance is large linear
+reads and, to a lesser extent, writes. The initiator performs look-ahead retrieval if it detects
+linear reads, and dynamically adjusts the size of the lookahead. You can set up a local cache,
+which comes in handy for things like running VMs on remote storage, at the expense of SSD wear and tear.
 
-There are some speed enhancements, but it is single-connection for simplicity and
-stability. It has a simple read-ahead buffer that makes the daemon achieve about 1 GB/sec
-against my hardware HDD-backed RAID Z1 array over 10 gbps, in synthetic tests (i.e. linear
-best-case reads against the raw device). So it saturates the connection in ideal conditions.
-Real-world tests on the entire stack are, for me, at best 300 MB/sec, which is what my
-10-year-old NAS can deliver. True optimization for other conditions will need more users,
-more time, and detailed reports.
+The architecture severely limits write performance. The main issue is the lack of communication FSKit
+provides; it has no write barrier signal, so I either force a sync on every write, or risk data loss.
+If you tell FSKit that you're done with a write, APFS will act on the lie and corruption will result
+in case of disconnection or any other hiccup. Issuing a Force Unit Access command on every write
+slows down throughput by about 4.5x, at least on my hardware. If you're confident in your infra,
+you can set the initiator to instead issue a FUA every a certain number of seconds. This will
+speed writes up. It also WILL wreck your mounted filesystem if there's a disconnection or server issue
+because the actual on-disk bytes will be inconsistent.
 
-A write larger than one SCSI command issues its chunks together rather than one
-round trip at a time, which measured 2.1x faster with Force Unit Access on and
-2.6x with the target caching. That helps large files; the small writes a running
-VM makes are a single command already and are unchanged.
+TL;DR don't disable FUA on every write unless you know what you're doing. **Especially don't disable it
+over WiFi, or a VPN, or Tailscale, etc.** Caveat emptor.
 
-A target can keep an optional **local disk cache** (target editor → Local
-cache, 1–16 GB, off by default): chunks read once and pushed out of the 32 MiB
-memory cache are kept on this Mac's disk, encrypted with a key that exists
-only in memory, for as long as the target is attached. It helps a working set
-larger than memory and slow links; it cannot help a first read, and writes
-still go to the target exactly as before.
+Most of the work and testing is done against a LUN on my actual, geriatric TrueNAS 25.04 server in my
+homelab. There is also a target simulator that can be, and was, used for destructive testing.
 
-Writes default to Force Unit Access on every command, because FSKit delivers no
-barrier signal and an acknowledged write sitting in a volatile target cache is a
-lie APFS will act on. That costs real throughput (measured 4.5x on my hardware).
-Each target can instead be set to commit its cache on a timer (1–60 s) or never,
-for targets whose cache is genuinely non-volatile — battery-backed, on a UPS, or
-write-through on the target side. The app warns loudly when you pick this: the
-interval bounds how _stale_ the disk can be after a target power cut, not whether
-the volume survives it intact.
-
-I have no way of testing against stacks other than TrueNAS on Intel hardware. The
-implementation _should_ respect the standard so it _should_ work. I'm currently
-using it to store VMs for some of my experiments, and it has worked for me so far.
-
-Final performance warning: by the nature of the driver, connections, and general architecture,
-sequential access performs much, much, _much_ better than random access, at least on HDDs.
-
-APFS, the default filesystem on Apple devices, is latency-hostile and clearly meant for SSDs.
-In my experience, on HDDs, it's bad. On iSCSI hosted on hard drives it's worse. Copying large
-files to and from, works well. Booting a macOS VM hosted on an iSCSI volume?
-You might as well be swapping floppies. It works, yes. It does not work _well_.
-
-CAVEAT USER.
-
-## Status
-
-A notarized DMG, dragged to Applications, gets you an APFS volume
-in Finder without ever opening Terminal. Verified end to end on 2026-08-14 on a
-clean macOS 26.6.1 machine with SIP on, no Xcode, no Apple ID and no developer
-account, against a real TrueNAS target: discover → add → attach → copy files →
-detach → re-attach. Full transcript in `docs/acceptance-2026-08-14.md`.
-
-368 tests pass (unit + integration + real-TCP-loopback) at 87.1% line
-coverage; the PDU fuzzer runs clean over 100 independent seeds
-(`scripts/fuzz-campaign.sh`). The protocol stack is verified against real
-hardware, not just the simulator.
-
-Some of those tests measure the process rather than its output, which is
-deliberate: the two worst bugs found in this codebase were a receive buffer
-that kept every byte a connection ever read, and secrets written to a keychain
-the daemon cannot reach. Both ran their lines correctly and produced correct
-results.
-
-What the app does today:
-
-- **Guides you through setting up.** For this to actually work it must satisfy
-  four conditions: installed in Applications, background service running,
-  filesystem extension registered, filesystem extension enabled. This is
-  re-checked on every launch and every return to the foreground. The screen
-  renders the results, of checks so you can easily see what steps are needed.
-  It also repairs: an update that drops the extension's registration shows up
-  as an ordinary unsatisfied step with a button.
-- **Discover, add, attach, detach**, from a menu bar item or a window, with CHAP.
-- **Attach at login**, per target, retrying for five minutes when the storage is not reachable yet.
-- **A diagnostics pane** showing negotiated login parameters, session recovery
-  count, and the target's write-cache state — everything the daemon knew and
-  had never told anyone.
-- **Uninstall** that removes its own daemon, secrets, and extension registration
-  in the one order that works.
-- **Updates** via Sparkle, which refuse to install while a volume is attached.
-
-### The FSKit enablement gate, and what it costs
-
-macOS requires the user to enable a third-party filesystem extension. On
-macOS 27 beta, that switch works, and the app deep-links to it. On macOS 26.x it
-is present but doesn't actually move. Feedback filed with Apple, will update this
-if they fix it. It was reproduced independently against Apple's own FSKitSample.
-On 26.x the app asks for consent and writes the necessary entry itself, sidestepping
-the bug.
-
-Both branches are measured, on both OS versions, with a notarized build and SIP
-on. `docs/backend-a-fskit-notes.md` has the evidence and
-`docs/feedback-fskit-enablement-26x.md` is the Feedback report.
-
-### There's a parked future backend.
-
-Future work is on a different backend that uses a DriverKit extension. It was
-extensively tested but it simply doesn't work, and requires Apple to fix an issue.
-
-- **APFS wedges the block device after the first access**, and it is not an
-  iSCSI problem: built with `ISCSI_DEXT_SCRATCH_DISK 1` the dext serves a RAM
-  buffer from its own memory — no daemon, no network, no target — and APFS
-  wedges identically, while ExFAT on the same driver is fine and APFS on an
-  `hdiutil` RAM disk is fine. In other words, there's a bug somewhere in APFS'
-  implementation... or in the interaction of these two things that I cannot
-  figure out.
-- **The DriverKit family entitlements are approval-gated**, so their presence
-  makes every Developer ID export fail at profile resolution.
-
-The reconnaissance in it is expensive and correct, so it is flagged rather than
-deleted. `swift build -Xswiftc -DISCSI_BACKEND_B` turns it back on; see the
-header of `scripts/vm-deploy-dext.sh` for what else re-enabling needs.
-
-There are some other delicate issues embodied in the implementation. For example,
-presenting the LUN as **removable** media makes macOS elide every flush in-kernel,
-so APFS's barriers became silent no-ops. When presented as a fixed disk, flushes
-reach the wire. See "The flush gap" in `docs/architecture.md`.
-
-## Run it on a network you trust
-
-iSCSI here is **plaintext TCP on port 3260**, and that is not a gap this
-project can close on its own. RFC 7143 defines exactly three authentication
-methods — Kerberos, SRP and CHAP — and **no TLS binding at all**; the transport
-protection the standard specifies is IPsec (RFC 3723, updated by RFC 7146).
-There is nothing to implement here that a target would understand, and the one
-this is developed against runs SCST, which has no TLS support either. So the
-transport gives you no confidentiality and no integrity.
-
-What that means concretely, for anyone on the path between this Mac and the
-target:
-
-- Every byte of the volume is readable. `Data-In` PDUs carry file contents in
-  the clear.
-- Every byte is modifiable, in both directions. The CRC32C header and data
-  digests are verified, but a checksum with a published polynomial is not a MAC
-  — anyone altering bytes simply recomputes it.
-- Responses can be forged wholesale: SCSI status, sense data, `READ CAPACITY`,
-  the login exchange.
-
-CHAP authenticates the _initiator to the target_. **Mutual CHAP** is the only
-control that would authenticate the target back — the thing that would catch a
-stand-in feeding this Mac a fabricated disk that macOS then mounts as APFS.
-
-It is implemented, tested, and **currently hidden in the UI**, because the
-target it was developed against cannot complete it. TrueNAS SCALE writes
-`OutgoingUser` into `/etc/scst.conf` and never loads it into
-`/sys/kernel/scst_tgt/`, including across an iSCSI service restart, so
-`iscsi-scstd` logs "CHAP target auth.: no outgoing credentials configured" and
-refuses the login. One-way and mutual logins minutes apart with the same
-credentials: one-way in, mutual out. Rather than ship a switch whose only
-observable effect was to break a working target, `CHAP.mutualIsOffered` turns
-it off; flipping that constant restores it. If you have a target that does
-answer a mutual challenge, that is worth hearing about.
-
-Run this on a trusted, isolated segment, or inside a WireGuard/IPsec tunnel.
-FileVault on the volume protects the data at rest and over the wire; it does not
-stop an on-path attacker from corrupting the filesystem underneath you.
-
-A target can be **pinned to one network interface** (target editor → Network),
-so its traffic stays on a dedicated storage link and never wanders onto Wi-Fi
-or into a VPN's route. Strict pins fail rather than use another interface;
-prefer pins fall back to macOS routing and say so in the Sessions window. It
-binds the interface's own address, so it works on a direct-attached link with
-no router.
-
-## Building
-
-```sh
-cd apps
-xcodegen generate          # produces iSCSIInitiator.xcodeproj
-open iSCSIInitiator.xcodeproj
-```
-
-Two schemes. **iSCSI Initiator** is what ships: the app, the embedded FSKit
-extension, and `iscsid` inside the bundle. **iSCSIDext-dev** builds the
-DriverKit extension on its own, for a SIP-off machine.
-
-The app builds against the macOS 26 SDK. Its one macOS 27 API,
-`FSClient.openFileSystemExtensionsSettings()`, is reached by selector
-(`FSKitSettingsLink`) so that the app CAN build with XCode 26 and the 26 SDK.
-
-## Releasing
-
-Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `apps/project.yml`,
-then push a tag:
-
-```sh
-git tag v0.4.3 && git push origin v0.4.3
-```
-
-`.github/workflows/release.yml` archives, exports a Developer ID build,
-notarizes and staples both the app and the DMG, signs it for Sparkle, creates
-the GitHub release, and only then commits the appcast entry — because a feed
-that names a file before the file exists is a failed download for every user who
-checks in between. It ends by fetching the published feed and confirming the URL
-it advertises really serves the bytes the signature covers.
-
-The workflow holds no build logic of its own; it runs `scripts/release.sh`, the
-same script that runs on a Mac:
-
-```sh
-scripts/release.sh --publish        # build, notarize, publish, write the feed
-scripts/release.sh                  # stop before publishing
-scripts/release.sh --skip-notarize  # for iterating on the script itself, nothing else
-```
-
-`docs/releasing.md` covers the six repository secrets, how to produce each, and
-what to do when a release fails halfway.
-
-## Testing
-
-CI (`.github/workflows/ci.yml`) runs the package tests, the app build, and the
-project-hygiene checks. The most valuable of those regenerates the Xcode project
-from `apps/project.yml` and fails on any diff.
-
-Two VMs, and which one answers a question matters:
-
-- **SIP on, no Xcode, no Apple ID** — the end-user acceptance rig. The only
-  place that can answer anything about consent, entitlements or Gatekeeper.
-- **SIP off** — the fast loop for the daemon, XPC, and the setup machine's own
-  logic. It cannot answer consent questions, because self-asserted entitlements
-  pass there, and its FSKit view is not trustworthy (see the note in
-  `docs/backend-a-fskit-notes.md`).
-
-## Layout
-
-```
-Sources/
-  iSCSIKit/          protocol core — no policy, fully testable
-    PDU/             all PDU types, framer with digest verification
-    Negotiation/     text-key negotiation, login state machine
-    Auth/            CHAP (forward + mutual)
-    Digest/          CRC32C
-    Session/         ISCSIConnection + ISCSISession (recovery, keepalive)
-    Transport/       ConnectionTransport, NetworkTransport (TCP), MemoryPipe
-    SCSI/            SCSITask, CDB builders, sense parsing
-    XPCProtocol      the daemon's surface, shared by app, extension and daemon
-    XPCModels        Codable DTOs that cross as Data, not NSSecureCoding
-    ISCSIError       one error domain; sense bytes and recovery text survive XPC
-    MountpointTag    sha256(portal|target|lun) — a compatibility contract
-  NVMeKit/           the NVMe/TCP twin of iSCSIKit, same rules, depends on it
-                     for the transport, CRC32C, deadline and the block seam
-    PDU/             the 9 NVMe/TCP PDU types, framer (data at PDO, digests)
-    Capsule/         SQE/SGL/CQE layouts, every command builder, the
-                     Identify/discovery-log parsers
-    Session/         NVMeQueue (one connection = one queue pair),
-                     NVMeController (admin + I/O queue, keep-alive, recovery),
-                     NVMeBlockDevice, NVMeDiscovery
-    Support/         little-endian accessors, the platform-derived host NQN
-  MockTarget/        scriptable iSCSI target and NVMe/TCP subsystem: protocol
-                     engines, one volatile write cache, one TCP listener
-                     (drives both the tests and the simulator)
-  iscsi-target-sim/  standalone local target (+ --nvme) + loopback control socket
-  iscsictl/          control CLI (discover, verify, read-bench, write-bench,
-                     wipe, and nvme discover|verify|read-bench); --debug
-                     traces every PDU and narrates the login
-  iscsid/            daemon: owns sessions, vends block I/O over XPC
-  iSCSIDaemon/       daemon core, target store, keychain, XPC authorization
-  iSCSIVolume/       the volume's data path: LUNStore, the local BackingStore
-                     and DaemonStore (RMW, chunk cache, ioLock). Split out of
-                     the FSKit extension so the tests can reach it
-  pdu-fuzz/          structure-aware fuzzer
-apps/
-  iSCSIApp/          the app: setup machine, menu bar, windows, attach path
-  iSCSIFSExtension/  FSKit module presenting the LUN as a file
-  iSCSIDext/         DriverKit virtual SCSI HBA (parked, ISCSI_BACKEND_B)
-Tests/
-  iSCSIKitTests/     iSCSI unit tests (PDUs, negotiation, CHAP, errors)
-  NVMeKitTests/      NVMe/TCP unit tests (framing, PDUs, SQE/CQE, builders,
-                     Identify and discovery-log parsing, host identity)
-  IntegrationTests/  happy paths, hostile scripts, recovery, TCP loopback,
-                     crash consistency, stalled-target resilience, XPC
-                     authorization, handle scoping, target persistence,
-                     authentication tracing, write chunk concurrency, the
-                     volume's read-modify-write and cache paths, keychain
-                     query shape, resource bounds — and the same suites
-                     again over NVMe/TCP, plus the daemon serving both
-scripts/
-  release.sh         notarized DMG + Sparkle signature + appcast
-  coverage-badges.sh the tests/coverage badges CI pushes to the badges branch
-  iscsi-attach.sh    the bash-era attach path, superseded by the app
-  bench.py           large-sequential throughput benchmark
-  soak.py            small-file / read-modify-write soak
-  crash-consistency.py  power-cut durability check
-  vm-*.sh            VM deployment, fault matrix, and reproducers
-  fuzz-campaign.sh   N-seed fuzzing campaign
-docs/                architecture, measurements, and the two Feedback drafts
-```
-
-## Try it
+Test it yourself:
 
 ```bash
 swift test                          # unit + integration suite
@@ -362,7 +136,7 @@ swift run iscsictl nvme verify 127.0.0.1 --subsystem nqn.2026-08.me.herko.sim:di
 ```
 
 `docs/open-questions.md` lists what is known to be untested, unexplained, or
-deferred — with what is known about each and how to attack it.
+deferred.
 
 See `docs/architecture.md` for the two-backend design and the DriverKit
 throughput caveat, `docs/backend-a-fskit-notes.md` for how the shipping backend
@@ -374,11 +148,8 @@ SMAppService really does, `docs/resilience.md` for the fault matrix, and
 
 Apache License 2.0 — see [LICENSE](LICENSE).
 
-Apache rather than MIT for the patent grant in section 3. This implements a
-standardised protocol, and a permissive licence that says nothing about patents
-leaves users relying on the goodwill of every contributor; Apache makes the
-grant explicit and terminates it for anyone who sues over it. The cost is a
-longer file and a requirement to note modifications.
+Apache rather than MIT. The motivation is that Apache makes patent grants explicit,
+reducing legal risk.
 
 Bundled dependencies, both permissive and neither imposing conditions on this
 code:
