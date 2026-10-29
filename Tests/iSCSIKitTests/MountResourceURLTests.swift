@@ -23,6 +23,21 @@ struct MountResourceURLTests {
         #expect(url.absoluteString == "iscsi://[fe80::1%25en0]/iqn.test:disk0/0")
     }
 
+    /// Reads the URL the way the extension's `makeStore` does — `url.host`,
+    /// `url.port ?? 3260`, the path split on `/` — because the daemon looks the
+    /// target up by that host string. A bracket left on, or a `%25` left
+    /// encoded, refuses the login as "not configured".
+    @Test("the extension reads back the host and port the target record holds",
+          arguments: ["fdbd:dc02:d:274::34", "fe80::1%en0", "192.168.0.101", "nas.local"],
+          [UInt16(3260), 4420])
+    func extensionRoundTrip(host: String, port: UInt16) throws {
+        let url = try MountResourceURL.make(host: host, port: port, target: "nqn.test:disk0", lun: 1)
+        let parsed = try #require(URL(string: url.absoluteString))
+        #expect(parsed.host == host)
+        #expect((parsed.port ?? 3260) == Int(port))
+        #expect(parsed.path.split(separator: "/") == ["nqn.test:disk0", "1"])
+    }
+
     @Test("IPv6 URL formatting leaves legacy mountpoint identity unchanged")
     func legacyIPv6Identity() throws {
         let host = "fdbd:dc02:d:274::34"
